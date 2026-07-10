@@ -1,0 +1,81 @@
+# GPT Pulse 本地发布
+
+`release.sh` 生成 macOS 14+ 的 Universal (`arm64` + `x86_64`) Release，并执行：
+
+1. 无签名构建，然后使用 `Developer ID Application`、hardened runtime 和 secure timestamp 手动签名。
+2. 将 App 打包为 ZIP 提交公证，等待 `Accepted`，再 staple App。
+3. 创建带 `GPT Pulse.app → Applications` 拖拽布局的压缩 DMG，并签名 DMG。
+4. 再次提交 DMG 公证，然后 staple DMG。
+5. 使用 `codesign`、`stapler`、`spctl`、`hdiutil` 和 `lipo` 验证最终 DMG 及其中的 App。
+6. 所有验证通过后，最后生成 `.sha256` 文件。
+
+脚本不会接收 Apple ID 或密码。公证仅使用 Keychain 中的 profile，默认为 `GPTPulseNotary`。
+
+## 前置条件
+
+- Xcode Command Line Tools、XcodeGen 和有效的 `Developer ID Application` 证书。
+- 已执行：
+
+  ```bash
+  xcrun notarytool store-credentials "GPTPulseNotary" \
+    --apple-id "<Apple ID>" \
+    --team-id "<Team ID>"
+  ```
+
+- 正式发布必须从 clean Git commit 执行。中间构建、公证 ZIP 和诊断位于已忽略的 `.build/release/`；最终 `dist/` 也必须保持在 `.gitignore` 中，只作为 GitHub Release 附件上传。
+
+## 常用命令
+
+先查看完整流程，不构建、不签名、不联网：
+
+```bash
+DRY_RUN=1 scripts/release.sh --allow-dirty
+```
+
+从 clean commit 一次完成正式发布：
+
+```bash
+scripts/release.sh --team-id "<Team ID>"
+```
+
+默认产物：
+
+```text
+dist/GPT-Pulse-0.1.0.dmg
+dist/GPT-Pulse-0.1.0.dmg.sha256
+```
+
+中断后可按阶段恢复：
+
+```bash
+scripts/release.sh --stage build --team-id "<Team ID>"
+scripts/release.sh --stage notarize-app
+scripts/release.sh --stage package --team-id "<Team ID>"
+scripts/release.sh --stage notarize-dmg
+scripts/release.sh --stage verify
+```
+
+`build` 会重建 `.build/release/DerivedData`；后续阶段复用该 App 和默认 DMG 路径。`package` 会拒绝未 staple 的 App，避免把仅签名但未公证的 App 放入 DMG。
+
+DMG 默认将 `Assets/Release/dmg-background.png` 和相邻的 `dmg-background@2x.png` 合成为 HiDPI TIFF，并从构建出的 App 复用 `AppIcon.icns` 作为卷图标。也可以显式覆盖背景和卷图标：
+
+```bash
+scripts/release.sh \
+  --background Assets/Release/dmg-background.png \
+  --volume-icon Assets/Brand/GPTPulse.icns \
+  --team-id "<Team ID>"
+```
+
+无 Finder 的临时环境可以传 `--skip-finder-layout`，但正式公开发布不应使用该参数。`--allow-dirty` 也只允许与 `DRY_RUN` 一起使用；任何真实构建、签名或公证都会要求 clean Git commit。
+
+如果 Keychain 中只有一个有效的 `Developer ID Application` 证书，脚本可以自动选择它。存在多个证书时，传 `--team-id`，或通过 `SIGNING_IDENTITY` 提供证书 SHA-1。不要把证书持有人名称写进仓库或发布文案；系统签名详情中的证书 Authority 属于 Apple 安全元数据，无法隐藏。
+
+## 公证稳定性
+
+脚本显式使用 `notarytool submit --no-wait`，再通过 `notarytool info` 轮询。这避免依赖长时间运行的 `submit --wait` 进程。默认每 15 秒查询一次，最多等待 30 分钟：
+
+```bash
+NOTARY_POLL_INTERVAL=15 NOTARY_TIMEOUT=1800 scripts/release.sh
+```
+
+被拒绝时，诊断会保存在 `.build/release/work-vVERSION/notary-*-log.json`，流程立即停止。

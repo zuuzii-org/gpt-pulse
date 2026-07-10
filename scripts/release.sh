@@ -1,0 +1,843 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+umask 077
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+readonly PROJECT_FILE="$REPO_ROOT/GPTPulse.xcodeproj"
+readonly PROJECT_SPEC="$REPO_ROOT/project.yml"
+readonly INFO_PLIST="$REPO_ROOT/GPTPulse/Resources/Info.plist"
+readonly APP_NAME="GPT Pulse.app"
+readonly APP_EXECUTABLE="GPT Pulse"
+readonly SCHEME="GPTPulse"
+readonly VOLUME_NAME="GPT Pulse"
+
+STAGE="all"
+VERSION=""
+OUTPUT_DIR=""
+BACKGROUND_PATH="${BACKGROUND_PATH:-}"
+VOLUME_ICON_PATH="${VOLUME_ICON_PATH:-}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-GPTPulseNotary}"
+SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
+TEAM_ID="${TEAM_ID:-}"
+DRY_RUN="${DRY_RUN:-0}"
+ALLOW_DIRTY="${ALLOW_DIRTY:-0}"
+SKIP_FINDER_LAYOUT="${SKIP_FINDER_LAYOUT:-0}"
+NOTARY_POLL_INTERVAL="${NOTARY_POLL_INTERVAL:-15}"
+NOTARY_TIMEOUT="${NOTARY_TIMEOUT:-1800}"
+
+DERIVED_DATA=""
+WORK_DIR=""
+APP_PATH=""
+APP_ZIP_PATH=""
+DMG_PATH=""
+CHECKSUM_PATH=""
+MOUNT_DIR=""
+MOUNTED=0
+RESOLVED_SIGNING_IDENTITY=""
+
+usage() {
+  cat <<'EOF'
+Build, sign, notarize, package, and verify GPT Pulse for macOS.
+
+Usage:
+  scripts/release.sh [options]
+
+Options:
+  --stage NAME              all (default), build, notarize-app, package,
+                            notarize-dmg, verify, or checksum
+  --version VERSION         Expected CFBundleShortVersionString
+  --output-dir PATH         Artifact directory (default: dist)
+  --background PATH         Optional 640x420 DMG background PNG
+  --volume-icon PATH        Optional .icns file for the mounted DMG volume
+  --notary-profile NAME     notarytool Keychain profile (default: GPTPulseNotary)
+  --team-id ID              Restrict automatic certificate selection to a Team ID
+  --signing-identity VALUE  Certificate SHA-1 or keychain identity name
+  --skip-finder-layout      Skip Finder window/icon layout (for headless rehearsal)
+  --allow-dirty             Permit a dirty or unborn Git worktree in DRY_RUN only
+  --dry-run                 Print mutating commands without executing them
+  -h, --help                Show this help
+
+Environment equivalents:
+  DRY_RUN, ALLOW_DIRTY, BACKGROUND_PATH, VOLUME_ICON_PATH, NOTARY_PROFILE,
+  SIGNING_IDENTITY, TEAM_ID, SKIP_FINDER_LAYOUT, NOTARY_POLL_INTERVAL,
+  NOTARY_TIMEOUT
+
+No Apple ID or password argument is accepted. Notarization always uses the
+named Keychain profile so credentials cannot appear in shell history or logs.
+EOF
+}
+
+log() {
+  printf '[release] %s\n' "$*"
+}
+
+warn() {
+  printf '[release] warning: %s\n' "$*" >&2
+}
+
+die() {
+  printf '[release] error: %s\n' "$*" >&2
+  exit 1
+}
+
+is_true() {
+  case "${1:-0}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+print_command() {
+  printf '[release] +'
+  printf ' %q' "$@"
+  printf '\n'
+}
+
+run() {
+  print_command "$@"
+  if ! is_true "$DRY_RUN"; then
+    "$@"
+  fi
+}
+
+capture() {
+  local output_file="$1"
+  shift
+  print_command "$@"
+  printf '[release]   > %q\n' "$output_file"
+  if ! is_true "$DRY_RUN"; then
+    "$@" >"$output_file"
+  fi
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+require_file() {
+  if ! is_true "$DRY_RUN"; then
+    [[ -f "$1" ]] || die "required file not found: $1"
+  fi
+}
+
+require_directory() {
+  if ! is_true "$DRY_RUN"; then
+    [[ -d "$1" ]] || die "required directory not found: $1"
+  fi
+}
+
+absolute_from_repo() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "$REPO_ROOT" "$1" ;;
+  esac
+}
+
+safe_remove_release_path() {
+  local path="$1"
+  case "$path" in
+    "$REPO_ROOT/.build/"*) run /bin/rm -rf "$path" ;;
+    *) die "refusing to recursively remove a path outside .build: $path" ;;
+  esac
+}
+
+cleanup() {
+  local exit_code=$?
+  if [[ "$MOUNTED" -eq 1 ]] && [[ -n "$MOUNT_DIR" ]]; then
+    /usr/bin/hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1 || true
+    MOUNTED=0
+  fi
+  exit "$exit_code"
+}
+
+trap cleanup EXIT
+
+parse_arguments() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --stage)
+        [[ $# -ge 2 ]] || die "--stage requires a value"
+        STAGE="$2"
+        shift 2
+        ;;
+      --version)
+        [[ $# -ge 2 ]] || die "--version requires a value"
+        VERSION="$2"
+        shift 2
+        ;;
+      --output-dir)
+        [[ $# -ge 2 ]] || die "--output-dir requires a value"
+        OUTPUT_DIR="$2"
+        shift 2
+        ;;
+      --background)
+        [[ $# -ge 2 ]] || die "--background requires a value"
+        BACKGROUND_PATH="$2"
+        shift 2
+        ;;
+      --volume-icon)
+        [[ $# -ge 2 ]] || die "--volume-icon requires a value"
+        VOLUME_ICON_PATH="$2"
+        shift 2
+        ;;
+      --notary-profile)
+        [[ $# -ge 2 ]] || die "--notary-profile requires a value"
+        NOTARY_PROFILE="$2"
+        shift 2
+        ;;
+      --team-id)
+        [[ $# -ge 2 ]] || die "--team-id requires a value"
+        TEAM_ID="$2"
+        shift 2
+        ;;
+      --signing-identity)
+        [[ $# -ge 2 ]] || die "--signing-identity requires a value"
+        SIGNING_IDENTITY="$2"
+        shift 2
+        ;;
+      --skip-finder-layout)
+        SKIP_FINDER_LAYOUT=1
+        shift
+        ;;
+      --allow-dirty)
+        ALLOW_DIRTY=1
+        shift
+        ;;
+      --dry-run)
+        DRY_RUN=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "unknown argument: $1"
+        ;;
+    esac
+  done
+}
+
+initialize_paths() {
+  local source_version
+  source_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$INFO_PLIST")"
+  if [[ -z "$VERSION" ]]; then
+    VERSION="$source_version"
+  fi
+  [[ "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z.-]*$ ]] || die "invalid version: $VERSION"
+  [[ "$source_version" == "$VERSION" ]] || \
+    die "requested version $VERSION does not match Info.plist version $source_version"
+
+  if [[ -z "$OUTPUT_DIR" ]]; then
+    OUTPUT_DIR="$REPO_ROOT/dist"
+  else
+    OUTPUT_DIR="$(absolute_from_repo "$OUTPUT_DIR")"
+  fi
+
+  if [[ -z "$BACKGROUND_PATH" ]] && \
+     [[ -f "$REPO_ROOT/Assets/Release/dmg-background.png" ]]; then
+    BACKGROUND_PATH="$REPO_ROOT/Assets/Release/dmg-background.png"
+  elif [[ -n "$BACKGROUND_PATH" ]]; then
+    BACKGROUND_PATH="$(absolute_from_repo "$BACKGROUND_PATH")"
+  fi
+
+  if [[ -n "$VOLUME_ICON_PATH" ]]; then
+    VOLUME_ICON_PATH="$(absolute_from_repo "$VOLUME_ICON_PATH")"
+  elif [[ -f "$REPO_ROOT/Assets/Brand/GPTPulse.icns" ]]; then
+    VOLUME_ICON_PATH="$REPO_ROOT/Assets/Brand/GPTPulse.icns"
+  fi
+
+  DERIVED_DATA="$REPO_ROOT/.build/release/DerivedData"
+  WORK_DIR="$REPO_ROOT/.build/release/work-v$VERSION"
+  APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME"
+  APP_ZIP_PATH="$WORK_DIR/GPT-Pulse-$VERSION-notarization.zip"
+  DMG_PATH="$OUTPUT_DIR/GPT-Pulse-$VERSION.dmg"
+  CHECKSUM_PATH="$DMG_PATH.sha256"
+  MOUNT_DIR="$WORK_DIR/mount"
+}
+
+validate_options() {
+  case "$STAGE" in
+    all|build|notarize-app|app-notarize|package|notarize-dmg|dmg-notarize|verify|checksum) ;;
+    *) die "unsupported stage: $STAGE" ;;
+  esac
+  [[ "$NOTARY_POLL_INTERVAL" =~ ^[0-9]+$ ]] || die "NOTARY_POLL_INTERVAL must be an integer"
+  [[ "$NOTARY_TIMEOUT" =~ ^[0-9]+$ ]] || die "NOTARY_TIMEOUT must be an integer"
+  (( NOTARY_POLL_INTERVAL >= 1 && NOTARY_POLL_INTERVAL <= 60 )) || \
+    die "NOTARY_POLL_INTERVAL must be between 1 and 60 seconds"
+  (( NOTARY_TIMEOUT >= NOTARY_POLL_INTERVAL )) || \
+    die "NOTARY_TIMEOUT must be at least NOTARY_POLL_INTERVAL"
+  [[ -n "$NOTARY_PROFILE" ]] || die "notary profile cannot be empty"
+  if [[ -n "$TEAM_ID" ]]; then
+    [[ "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || die "TEAM_ID must be a 10-character Apple Team ID"
+  fi
+  if is_true "$ALLOW_DIRTY" && ! is_true "$DRY_RUN"; then
+    die "--allow-dirty is restricted to DRY_RUN; formal artifacts require a clean commit"
+  fi
+  if [[ -n "$BACKGROUND_PATH" ]]; then
+    [[ -f "$BACKGROUND_PATH" ]] || die "DMG background not found: $BACKGROUND_PATH"
+  fi
+  if [[ -n "$VOLUME_ICON_PATH" ]]; then
+    [[ -f "$VOLUME_ICON_PATH" ]] || die "DMG volume icon not found: $VOLUME_ICON_PATH"
+    [[ "$VOLUME_ICON_PATH" == *.icns ]] || die "DMG volume icon must be an .icns file"
+  fi
+}
+
+require_clean_worktree() {
+  local status
+  if is_true "$ALLOW_DIRTY"; then
+    warn "dirty-worktree protection is disabled"
+    return
+  fi
+  /usr/bin/git -C "$REPO_ROOT" rev-parse --verify HEAD >/dev/null 2>&1 || \
+    die "release builds require a committed HEAD; use --allow-dirty only for rehearsal"
+  status="$(/usr/bin/git -C "$REPO_ROOT" status --porcelain --untracked-files=all)"
+  [[ -z "$status" ]] || \
+    die "Git worktree is not clean; commit changes before producing release artifacts"
+}
+
+resolve_signing_identity() {
+  local identities matches count
+  if [[ -n "$RESOLVED_SIGNING_IDENTITY" ]]; then
+    return
+  fi
+  if [[ -n "$SIGNING_IDENTITY" ]]; then
+    RESOLVED_SIGNING_IDENTITY="$SIGNING_IDENTITY"
+    log "using the explicitly configured Developer ID identity"
+    return
+  fi
+
+  identities="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null || true)"
+  matches="$(printf '%s\n' "$identities" | /usr/bin/sed -n \
+    '/"Developer ID Application:/s/^[[:space:]]*[0-9][0-9]*)[[:space:]]*\([0-9A-F][0-9A-F]*\).*/\1/p')"
+  if [[ -n "$TEAM_ID" ]]; then
+    matches="$(printf '%s\n' "$identities" | /usr/bin/grep '"Developer ID Application:' | \
+      /usr/bin/grep "(${TEAM_ID})" | /usr/bin/sed -n \
+      's/^[[:space:]]*[0-9][0-9]*)[[:space:]]*\([0-9A-F][0-9A-F]*\).*/\1/p' || true)"
+  fi
+  count="$(printf '%s\n' "$matches" | /usr/bin/sed '/^[[:space:]]*$/d' | /usr/bin/wc -l | /usr/bin/tr -d ' ')"
+  [[ "$count" == "1" ]] || \
+    die "expected exactly one Developer ID Application identity; set TEAM_ID or SIGNING_IDENTITY"
+  RESOLVED_SIGNING_IDENTITY="$(printf '%s\n' "$matches" | /usr/bin/sed -n '1p')"
+  log "resolved one Developer ID Application identity from the keychain"
+}
+
+verify_universal_code() {
+  local bundle="$1"
+  local found=0
+  local code_file
+  require_directory "$bundle"
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] verify every Mach-O in $bundle contains arm64 and x86_64"
+    return
+  fi
+  while IFS= read -r -d '' code_file; do
+    if /usr/bin/file -b "$code_file" | /usr/bin/grep -q 'Mach-O'; then
+      found=1
+      /usr/bin/lipo -verify_arch arm64 x86_64 "$code_file" >/dev/null || \
+        die "non-universal Mach-O found: $code_file"
+    fi
+  done < <(/usr/bin/find "$bundle" -type f -print0)
+  [[ "$found" -eq 1 ]] || die "no Mach-O executable found in $bundle"
+  log "verified all Mach-O files contain arm64 and x86_64"
+}
+
+verify_app_signature() {
+  local app="$1"
+  local signature_info
+  require_directory "$app"
+  run /usr/bin/codesign --verify --deep --strict --verbose=2 "$app"
+  if is_true "$DRY_RUN"; then
+    return
+  fi
+  signature_info="$(/usr/bin/codesign -d --verbose=4 "$app" 2>&1)"
+  [[ "$signature_info" == *"Authority=Developer ID Application:"* ]] || \
+    die "app is not signed with a Developer ID Application certificate"
+  [[ "$signature_info" == *"runtime"* ]] || die "app signature is missing hardened runtime"
+  [[ "$signature_info" == *"Timestamp="* ]] || die "app signature is missing a secure timestamp"
+  if [[ -n "$TEAM_ID" ]]; then
+    [[ "$signature_info" == *"TeamIdentifier=$TEAM_ID"* ]] || \
+      die "app signature does not match TEAM_ID"
+  fi
+}
+
+verify_app_metadata() {
+  local app="$1"
+  local plist="$app/Contents/Info.plist"
+  local bundle_id short_version build_version ui_element minimum_system
+  local source_build
+  require_file "$plist"
+  require_file "$app/Contents/Resources/AppIcon.icns"
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] verify bundle ID, version, build, LSUIElement, minimum macOS, and AppIcon.icns"
+    return
+  fi
+
+  bundle_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$plist")"
+  short_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$plist")"
+  build_version="$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$plist")"
+  ui_element="$(/usr/bin/plutil -extract LSUIElement raw -o - "$plist")"
+  minimum_system="$(/usr/bin/plutil -extract LSMinimumSystemVersion raw -o - "$plist")"
+  source_build="$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$INFO_PLIST")"
+
+  [[ "$bundle_id" == "com.zuuzii.GPTPulse" ]] || die "unexpected bundle ID: $bundle_id"
+  [[ "$short_version" == "$VERSION" ]] || die "unexpected app version: $short_version"
+  [[ "$build_version" == "$source_build" ]] || die "unexpected app build: $build_version"
+  [[ "$ui_element" == "true" || "$ui_element" == "1" ]] || die "LSUIElement is not enabled"
+  /usr/bin/awk -v version="$minimum_system" 'BEGIN {
+    gsub(/^[[:space:]]+/, "", version)
+    gsub(/[[:space:]]+$/, "", version)
+    exit !(version == "14" || version == "14.0" || version == "14.0.0")
+  }' || die "minimum macOS version must be exactly 14.0: $minimum_system"
+  log "verified app metadata and icon resources"
+}
+
+verify_dmg_signature() {
+  local dmg="$1"
+  local signature_info
+  require_file "$dmg"
+  run /usr/bin/codesign --verify --strict --verbose=2 "$dmg"
+  if is_true "$DRY_RUN"; then
+    return
+  fi
+  signature_info="$(/usr/bin/codesign -d --verbose=4 "$dmg" 2>&1)"
+  [[ "$signature_info" == *"Authority=Developer ID Application:"* ]] || \
+    die "DMG is not signed with a Developer ID Application certificate"
+  [[ "$signature_info" == *"Timestamp="* ]] || die "DMG signature is missing a secure timestamp"
+}
+
+sign_embedded_code() {
+  local app="$1"
+  local code_file bundle
+
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] sign embedded Mach-O files and code bundles from deepest to shallowest"
+    return
+  fi
+
+  while IFS= read -r -d '' code_file; do
+    [[ "$code_file" == "$app/Contents/MacOS/$APP_EXECUTABLE" ]] && continue
+    if /usr/bin/file -b "$code_file" | /usr/bin/grep -q 'Mach-O'; then
+      run /usr/bin/codesign --force --options runtime --timestamp \
+        --generate-entitlement-der --sign "$RESOLVED_SIGNING_IDENTITY" "$code_file"
+    fi
+  done < <(/usr/bin/find "$app/Contents" -type f -print0)
+
+  while IFS= read -r bundle; do
+    [[ -n "$bundle" ]] || continue
+    run /usr/bin/codesign --force --options runtime --timestamp \
+      --generate-entitlement-der --sign "$RESOLVED_SIGNING_IDENTITY" "$bundle"
+  done < <(/usr/bin/find "$app/Contents" -type d \
+    \( -name '*.framework' -o -name '*.xpc' -o -name '*.appex' -o -name '*.app' \) \
+    -print | /usr/bin/awk '{ print length($0) "\t" $0 }' | \
+    /usr/bin/sort -rn | /usr/bin/cut -f2-)
+}
+
+build_and_sign_app() {
+  local built_version
+  log "building macOS $VERSION Release for arm64 + x86_64"
+  require_clean_worktree
+  resolve_signing_identity
+  safe_remove_release_path "$DERIVED_DATA"
+  safe_remove_release_path "$WORK_DIR"
+  run /bin/mkdir -p "$OUTPUT_DIR"
+
+  run "$(command -v xcodegen)" generate --spec "$PROJECT_SPEC"
+  require_clean_worktree
+  run /usr/bin/xcodebuild \
+    -project "$PROJECT_FILE" \
+    -scheme "$SCHEME" \
+    -configuration Release \
+    -destination 'generic/platform=macOS' \
+    -derivedDataPath "$DERIVED_DATA" \
+    ARCHS='arm64 x86_64' \
+    ONLY_ACTIVE_ARCH=NO \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    build
+
+  require_directory "$APP_PATH"
+  if ! is_true "$DRY_RUN"; then
+    built_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - \
+      "$APP_PATH/Contents/Info.plist")"
+    [[ "$built_version" == "$VERSION" ]] || \
+      die "built app version $built_version does not match $VERSION"
+  fi
+  verify_universal_code "$APP_PATH"
+  verify_app_metadata "$APP_PATH"
+  sign_embedded_code "$APP_PATH"
+  run /usr/bin/codesign --force --options runtime --timestamp \
+    --generate-entitlement-der --sign "$RESOLVED_SIGNING_IDENTITY" "$APP_PATH"
+  verify_app_signature "$APP_PATH"
+  log "signed app ready: $APP_PATH"
+}
+
+json_field() {
+  /usr/bin/plutil -extract "$2" raw -o - "$1" 2>/dev/null || true
+}
+
+fetch_notary_log() {
+  local submission_id="$1"
+  local label="$2"
+  local log_path="$WORK_DIR/notary-$label-log.json"
+  if ! /usr/bin/xcrun notarytool log "$submission_id" \
+    --keychain-profile "$NOTARY_PROFILE" --output-format json >"$log_path"; then
+    warn "could not fetch notarization diagnostics"
+  else
+    warn "notarization diagnostics saved to $log_path"
+  fi
+}
+
+notarize_artifact() {
+  local artifact="$1"
+  local label="$2"
+  local submit_path="$WORK_DIR/notary-$label-submit.json"
+  local info_path="$WORK_DIR/notary-$label-info.json"
+  local submission_id status previous_status=""
+  local started_at now
+
+  require_file "$artifact"
+  run /bin/mkdir -p "$WORK_DIR"
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] submit $artifact with notary profile $NOTARY_PROFILE (no wait)"
+    log "[dry-run] poll notarytool info every ${NOTARY_POLL_INTERVAL}s for up to ${NOTARY_TIMEOUT}s"
+    return
+  fi
+
+  capture "$submit_path" /usr/bin/xcrun notarytool submit "$artifact" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --no-wait --no-progress --output-format json
+  submission_id="$(json_field "$submit_path" id)"
+  [[ -n "$submission_id" ]] || die "notarytool did not return a submission ID; see $submit_path"
+  log "$label notarization submitted"
+
+  started_at="$(/bin/date +%s)"
+  while :; do
+    capture "$info_path" /usr/bin/xcrun notarytool info "$submission_id" \
+      --keychain-profile "$NOTARY_PROFILE" --no-progress --output-format json
+    status="$(json_field "$info_path" status)"
+    [[ -n "$status" ]] || die "notarytool returned no status; see $info_path"
+    if [[ "$status" != "$previous_status" ]]; then
+      log "$label notarization status: $status"
+      previous_status="$status"
+    fi
+    case "$status" in
+      Accepted)
+        return
+        ;;
+      Invalid|Rejected)
+        fetch_notary_log "$submission_id" "$label"
+        die "$label notarization was rejected"
+        ;;
+      'In Progress'|Submitted|Uploaded)
+        ;;
+      *)
+        fetch_notary_log "$submission_id" "$label"
+        die "unknown $label notarization status: $status"
+        ;;
+    esac
+    now="$(/bin/date +%s)"
+    (( now - started_at < NOTARY_TIMEOUT )) || \
+      die "$label notarization timed out; submission ID: $submission_id"
+    /bin/sleep "$NOTARY_POLL_INTERVAL"
+  done
+}
+
+notarize_and_staple_app() {
+  log "notarizing the signed app"
+  require_clean_worktree
+  verify_universal_code "$APP_PATH"
+  verify_app_signature "$APP_PATH"
+  run /bin/mkdir -p "$WORK_DIR"
+  run /bin/rm -f "$APP_ZIP_PATH"
+  run /usr/bin/ditto -c -k --keepParent "$APP_PATH" "$APP_ZIP_PATH"
+  notarize_artifact "$APP_ZIP_PATH" app
+  run /usr/bin/xcrun stapler staple -v "$APP_PATH"
+  run /usr/bin/xcrun stapler validate -v "$APP_PATH"
+  verify_app_signature "$APP_PATH"
+  run /usr/sbin/spctl --assess --type execute --verbose=4 "$APP_PATH"
+  log "notarized app is stapled and accepted by Gatekeeper"
+}
+
+apply_finder_layout() {
+  local background_name="$1"
+  if is_true "$SKIP_FINDER_LAYOUT"; then
+    warn "Finder DMG layout was explicitly skipped"
+    return
+  fi
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] apply 640x420 Finder layout with app and Applications icons"
+    return
+  fi
+
+  /usr/bin/osascript - "$VOLUME_NAME" "$APP_NAME" "$background_name" <<'APPLESCRIPT'
+on run argv
+  set volumeName to item 1 of argv
+  set applicationName to item 2 of argv
+  set backgroundName to item 3 of argv
+
+  tell application "Finder"
+    tell disk volumeName
+      open
+      set dmgWindow to container window
+      set current view of dmgWindow to icon view
+      set toolbar visible of dmgWindow to false
+      set statusbar visible of dmgWindow to false
+      set pathbar visible of dmgWindow to false
+      -- Finder bounds include the title bar; 448px yields a 420px content area.
+      set bounds of dmgWindow to {200, 120, 840, 568}
+
+      set viewOptions to icon view options of dmgWindow
+      set arrangement of viewOptions to not arranged
+      set icon size of viewOptions to 112
+      set text size of viewOptions to 13
+      if backgroundName is not "" then
+        set background picture of viewOptions to file (".background:" & backgroundName)
+      else
+        set background color of viewOptions to {10537, 11051, 12336}
+      end if
+
+      set position of item applicationName to {160, 205}
+      set position of item "Applications" to {480, 205}
+      update without registering applications
+      delay 2
+      close dmgWindow
+    end tell
+  end tell
+end run
+APPLESCRIPT
+}
+
+calculate_dmg_size_mb() {
+  local app_kb size_mb
+  if is_true "$DRY_RUN"; then
+    printf '200\n'
+    return
+  fi
+  app_kb="$(/usr/bin/du -sk "$APP_PATH" | /usr/bin/awk '{print $1}')"
+  size_mb=$(( app_kb / 1024 + 64 ))
+  (( size_mb >= 128 )) || size_mb=128
+  printf '%s\n' "$size_mb"
+}
+
+create_and_sign_dmg() {
+  local rw_dmg="$WORK_DIR/GPT-Pulse-$VERSION-rw.dmg"
+  local unsigned_dmg="$WORK_DIR/GPT-Pulse-$VERSION-unsigned.dmg"
+  local background_name=""
+  local background_2x=""
+  local effective_volume_icon="$VOLUME_ICON_PATH"
+  local dmg_size_mb setfile_path
+
+  log "creating signed DMG"
+  require_clean_worktree
+  verify_app_signature "$APP_PATH"
+  run /usr/bin/xcrun stapler validate -v "$APP_PATH"
+  resolve_signing_identity
+  safe_remove_release_path "$MOUNT_DIR"
+  run /bin/mkdir -p "$MOUNT_DIR" "$OUTPUT_DIR"
+  run /bin/rm -f "$rw_dmg" "$unsigned_dmg" "$DMG_PATH" "$CHECKSUM_PATH"
+
+  dmg_size_mb="$(calculate_dmg_size_mb)"
+  run /usr/bin/hdiutil create -quiet -size "${dmg_size_mb}m" \
+    -fs HFS+ -type UDIF -volname "$VOLUME_NAME" "$rw_dmg"
+  run /usr/bin/hdiutil attach "$rw_dmg" -readwrite -noverify -noautoopen \
+    -mountpoint "$MOUNT_DIR"
+  if ! is_true "$DRY_RUN"; then
+    MOUNTED=1
+  fi
+
+  run /usr/bin/ditto --rsrc --extattr "$APP_PATH" "$MOUNT_DIR/$APP_NAME"
+  run /bin/ln -s /Applications "$MOUNT_DIR/Applications"
+
+  if [[ -n "$BACKGROUND_PATH" ]]; then
+    run /bin/mkdir -p "$MOUNT_DIR/.background"
+    background_2x="${BACKGROUND_PATH%.*}@2x.${BACKGROUND_PATH##*.}"
+    if [[ -f "$background_2x" ]]; then
+      background_name="dmg-background.tiff"
+      run /usr/bin/tiffutil -cathidpicheck "$BACKGROUND_PATH" "$background_2x" \
+        -out "$MOUNT_DIR/.background/$background_name"
+    else
+      background_name="$(basename "$BACKGROUND_PATH")"
+      run /bin/cp "$BACKGROUND_PATH" "$MOUNT_DIR/.background/$background_name"
+    fi
+  fi
+
+  if [[ -z "$effective_volume_icon" ]]; then
+    effective_volume_icon="$APP_PATH/Contents/Resources/AppIcon.icns"
+  fi
+  require_file "$effective_volume_icon"
+  if [[ -n "$effective_volume_icon" ]]; then
+    run /bin/cp "$effective_volume_icon" "$MOUNT_DIR/.VolumeIcon.icns"
+    setfile_path="$(/usr/bin/xcrun --find SetFile 2>/dev/null || true)"
+    [[ -n "$setfile_path" ]] || die "SetFile is required when --volume-icon is used"
+    run "$setfile_path" -a C "$MOUNT_DIR"
+  fi
+
+  apply_finder_layout "$background_name"
+  run /usr/bin/sync
+  run /usr/bin/hdiutil detach "$MOUNT_DIR"
+  if ! is_true "$DRY_RUN"; then
+    MOUNTED=0
+  fi
+  run /usr/bin/hdiutil convert "$rw_dmg" -quiet -format UDZO \
+    -imagekey zlib-level=9 -o "$unsigned_dmg"
+  run /bin/mv "$unsigned_dmg" "$DMG_PATH"
+  run /usr/bin/codesign --force --timestamp \
+    --sign "$RESOLVED_SIGNING_IDENTITY" "$DMG_PATH"
+  verify_dmg_signature "$DMG_PATH"
+  run /usr/bin/hdiutil verify "$DMG_PATH"
+  log "signed DMG ready: $DMG_PATH"
+}
+
+notarize_and_staple_dmg() {
+  log "notarizing the signed DMG"
+  require_clean_worktree
+  verify_dmg_signature "$DMG_PATH"
+  run /usr/bin/hdiutil verify "$DMG_PATH"
+  notarize_artifact "$DMG_PATH" dmg
+  run /usr/bin/xcrun stapler staple -v "$DMG_PATH"
+  run /usr/bin/xcrun stapler validate -v "$DMG_PATH"
+  verify_dmg_signature "$DMG_PATH"
+  run /usr/bin/hdiutil verify "$DMG_PATH"
+  run /usr/sbin/spctl --assess --type open --context context:primary-signature \
+    --verbose=4 "$DMG_PATH"
+  log "notarized DMG is stapled and accepted by Gatekeeper"
+}
+
+verify_final_release() {
+  local mounted_app="$MOUNT_DIR/$APP_NAME"
+  local getfileinfo_path volume_attributes
+  log "performing final offline verification"
+  require_clean_worktree
+  require_file "$DMG_PATH"
+  run /usr/bin/xcrun stapler validate -v "$DMG_PATH"
+  verify_dmg_signature "$DMG_PATH"
+  run /usr/bin/hdiutil verify "$DMG_PATH"
+  run /usr/sbin/spctl --assess --type open --context context:primary-signature \
+    --verbose=4 "$DMG_PATH"
+
+  safe_remove_release_path "$MOUNT_DIR"
+  run /bin/mkdir -p "$MOUNT_DIR"
+  run /usr/bin/hdiutil attach "$DMG_PATH" -readonly -noverify -noautoopen \
+    -mountpoint "$MOUNT_DIR"
+  if ! is_true "$DRY_RUN"; then
+    MOUNTED=1
+  fi
+  verify_universal_code "$mounted_app"
+  verify_app_metadata "$mounted_app"
+  verify_app_signature "$mounted_app"
+  run /usr/bin/xcrun stapler validate -v "$mounted_app"
+  run /usr/sbin/spctl --assess --type execute --verbose=4 "$mounted_app"
+  if ! is_true "$DRY_RUN"; then
+    [[ -L "$MOUNT_DIR/Applications" ]] || die "DMG Applications item is not a symlink"
+    [[ "$(/usr/bin/readlink "$MOUNT_DIR/Applications")" == "/Applications" ]] || \
+      die "DMG Applications symlink has the wrong target"
+    [[ -f "$MOUNT_DIR/.VolumeIcon.icns" ]] || die "DMG volume icon is missing"
+    if [[ -n "$BACKGROUND_PATH" ]] && [[ -f "${BACKGROUND_PATH%.*}@2x.${BACKGROUND_PATH##*.}" ]]; then
+      [[ -f "$MOUNT_DIR/.background/dmg-background.tiff" ]] || \
+        die "DMG HiDPI background TIFF is missing"
+    fi
+    getfileinfo_path="$(/usr/bin/xcrun --find GetFileInfo 2>/dev/null || true)"
+    [[ -n "$getfileinfo_path" ]] || die "GetFileInfo is required for final DMG validation"
+    volume_attributes="$("$getfileinfo_path" -a "$MOUNT_DIR")"
+    [[ "$volume_attributes" == *C* ]] || die "DMG custom volume icon bit is not set"
+  else
+    log "[dry-run] verify Applications symlink, HiDPI background, and custom volume icon bit"
+  fi
+  run /usr/bin/hdiutil detach "$MOUNT_DIR"
+  if ! is_true "$DRY_RUN"; then
+    MOUNTED=0
+  fi
+  log "final DMG and contained app passed all verification checks"
+}
+
+write_checksum() {
+  local dmg_basename checksum_basename
+  require_file "$DMG_PATH"
+  dmg_basename="$(basename "$DMG_PATH")"
+  checksum_basename="$(basename "$CHECKSUM_PATH")"
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] (cd $OUTPUT_DIR && shasum -a 256 $dmg_basename > $checksum_basename)"
+    return
+  fi
+  (
+    cd "$OUTPUT_DIR"
+    /usr/bin/shasum -a 256 "$dmg_basename" >"$checksum_basename"
+  )
+  log "SHA-256 written last: $CHECKSUM_PATH"
+}
+
+preflight() {
+  require_file "$PROJECT_SPEC"
+  require_file "$INFO_PLIST"
+  require_command git
+  require_command plutil
+  require_command codesign
+  require_command security
+  require_command xcrun
+  require_command xcodebuild
+  require_command xcodegen
+  require_command ditto
+  require_command file
+  require_command find
+  require_command lipo
+  require_command hdiutil
+  require_command tiffutil
+  require_command spctl
+  require_command shasum
+  if ! is_true "$SKIP_FINDER_LAYOUT"; then
+    require_command osascript
+  fi
+  require_clean_worktree
+}
+
+run_stage() {
+  case "$STAGE" in
+    all)
+      build_and_sign_app
+      notarize_and_staple_app
+      create_and_sign_dmg
+      notarize_and_staple_dmg
+      verify_final_release
+      write_checksum
+      ;;
+    build)
+      build_and_sign_app
+      ;;
+    notarize-app|app-notarize)
+      notarize_and_staple_app
+      ;;
+    package)
+      create_and_sign_dmg
+      ;;
+    notarize-dmg|dmg-notarize)
+      notarize_and_staple_dmg
+      ;;
+    verify)
+      verify_final_release
+      write_checksum
+      ;;
+    checksum)
+      require_clean_worktree
+      write_checksum
+      ;;
+  esac
+}
+
+main() {
+  parse_arguments "$@"
+  cd "$REPO_ROOT"
+  initialize_paths
+  validate_options
+  preflight
+  log "stage=$STAGE version=$VERSION output=$OUTPUT_DIR"
+  if is_true "$DRY_RUN"; then
+    warn "DRY_RUN is enabled; no mutating command will execute"
+  fi
+  run_stage
+  log "release stage completed successfully"
+}
+
+main "$@"

@@ -1,0 +1,66 @@
+name: GPTPulse
+
+options:
+  bundleIdPrefix: com.zuuzii
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CLANG_ENABLE_MODULES: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  GPTPulse:
+    type: application
+    platform: macOS
+    sources:
+      - path: GPTPulse
+        excludes:
+          - Resources/Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: GPT Pulse
+        PRODUCT_MODULE_NAME: GPTPulse
+        PRODUCT_BUNDLE_IDENTIFIER: com.zuuzii.GPTPulse
+        INFOPLIST_FILE: GPTPulse/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+      configs:
+        Debug:
+          ONLY_ACTIVE_ARCH: YES
+        Release:
+          VALIDATE_PRODUCT: YES
+    dependencies:
+      - sdk: libsqlite3.tbd
+    scheme:
+      testTargets:
+        - GPTPulseTests
+
+  GPTPulseTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: GPTPulseTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zuuzii.GPTPulseTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/GPT Pulse.app/Contents/MacOS/GPT Pulse"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    dependencies:
+      - target: GPTPulse
