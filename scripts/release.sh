@@ -336,7 +336,7 @@ verify_universal_code() {
   while IFS= read -r -d '' code_file; do
     if /usr/bin/file -b "$code_file" | /usr/bin/grep -q 'Mach-O'; then
       found=1
-      /usr/bin/lipo -verify_arch arm64 x86_64 "$code_file" >/dev/null || \
+      /usr/bin/lipo "$code_file" -verify_arch arm64 x86_64 >/dev/null || \
         die "non-universal Mach-O found: $code_file"
     fi
   done < <(/usr/bin/find "$bundle" -type f -print0)
