@@ -643,39 +643,41 @@ apply_finder_layout() {
     return
   fi
 
-  /usr/bin/osascript - "$VOLUME_NAME" "$APP_NAME" "$background_name" <<'APPLESCRIPT'
+  /usr/bin/osascript - "$MOUNT_DIR" "$APP_NAME" "$background_name" <<'APPLESCRIPT'
 on run argv
-  set volumeName to item 1 of argv
+  set mountPath to item 1 of argv
   set applicationName to item 2 of argv
   set backgroundName to item 3 of argv
+  set mountedFolder to POSIX file mountPath as alias
 
   tell application "Finder"
-    tell disk volumeName
-      open
-      set dmgWindow to container window
-      set current view of dmgWindow to icon view
-      set toolbar visible of dmgWindow to false
-      set statusbar visible of dmgWindow to false
-      set pathbar visible of dmgWindow to false
-      -- Finder bounds include the title bar; 448px yields a 420px content area.
-      set bounds of dmgWindow to {200, 120, 840, 568}
+    open mountedFolder
+    delay 1
+    -- Resolve the exact custom mount path. Finder does not consistently
+    -- expose `disk <volume name>` for volumes mounted outside /Volumes.
+    set dmgWindow to container window of mountedFolder
+    set current view of dmgWindow to icon view
+    set toolbar visible of dmgWindow to false
+    set statusbar visible of dmgWindow to false
+    set pathbar visible of dmgWindow to false
+    -- Finder bounds include the title bar; 448px yields a 420px content area.
+    set bounds of dmgWindow to {200, 120, 840, 568}
 
-      set viewOptions to icon view options of dmgWindow
-      set arrangement of viewOptions to not arranged
-      set icon size of viewOptions to 112
-      set text size of viewOptions to 13
-      if backgroundName is not "" then
-        set background picture of viewOptions to file (".background:" & backgroundName)
-      else
-        set background color of viewOptions to {10537, 11051, 12336}
-      end if
+    set viewOptions to icon view options of dmgWindow
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 112
+    set text size of viewOptions to 13
+    if backgroundName is not "" then
+      set background picture of viewOptions to file (mountPath & "/.background/" & backgroundName) as POSIX file
+    else
+      set background color of viewOptions to {10537, 11051, 12336}
+    end if
 
-      set position of item applicationName to {160, 205}
-      set position of item "Applications" to {480, 205}
-      update without registering applications
-      delay 2
-      close dmgWindow
-    end tell
+    set position of item applicationName of mountedFolder to {160, 205}
+    set position of item "Applications" of mountedFolder to {480, 205}
+    update mountedFolder without registering applications
+    delay 2
+    close dmgWindow
   end tell
 end run
 APPLESCRIPT
