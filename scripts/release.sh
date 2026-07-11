@@ -750,7 +750,7 @@ create_and_sign_dmg() {
   fi
 
   apply_finder_layout "$background_name"
-  run /usr/bin/sync
+  run /bin/sync
   run /usr/bin/hdiutil detach "$MOUNT_DIR"
   if ! is_true "$DRY_RUN"; then
     MOUNTED=0
