@@ -1,11 +1,11 @@
 # GPT Pulse 发布流程
 
-本文档用于发布 GPT Pulse macOS 应用和配套的 Codex 插件。当前基准版本为 `1.0.0`，品牌署名统一使用 **Zuuzii**。
+本文档用于发布 GPT Pulse macOS 应用和配套的 Codex 插件。当前基准版本为 `1.1.0`，品牌署名统一使用 **Zuuzii**。
 
 ## 发布原则
 
 - 发布源码必须来自 `main` 的干净、已推送 commit。
-- App、插件 manifest、tag、DMG 和 Release Notes 必须使用同一版本号。
+- App、插件 manifest、tag、DMG、appcast 和 Release Notes 必须使用同一版本号。
 - 产物必须为 `arm64 + x86_64` Universal App，最低支持 macOS 14。
 - App 和 DMG 都必须通过签名、Apple 公证、staple 与 Gatekeeper 验证。
 - Release 先作为 Draft 上传，从 GitHub 重新下载验证后才公开。
@@ -20,6 +20,7 @@
 - `gh` CLI，已登录且可向 `zuuzii-org/gpt-pulse` 推送 tag 和创建 Release。
 - 登录 Keychain 中可用的 Developer ID Application 证书。
 - Keychain 中名为 `GPTPulseNotary` 的 `notarytool` 凭据 profile。
+- Keychain 中 Sparkle account `zuuzii` 的 EdDSA private key；仓库只保存匹配的 public key。
 
 检查工具、身份与公证 profile：
 
@@ -29,21 +30,24 @@ xcodegen --version
 gh auth status
 security find-identity -v -p codesigning | grep -q "Developer ID Application"
 xcrun notarytool history --keychain-profile "GPTPulseNotary" >/dev/null
+.build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys \
+  --account zuuzii -p
 ```
 
 ### 凭据安全
 
-`GPTPulseNotary` 只是 Keychain profile 名，可以出现在命令或脚本中；实际凭据必须由 Keychain 保管。
+`GPTPulseNotary` 与 Sparkle account `zuuzii` 都只是 Keychain lookup 名，可以出现在命令或脚本中；实际凭据必须由 Keychain 保管。
 
 - 不要把 Apple ID app-specific password、App Store Connect API `.p8` key、`.p12` 证书、Keychain 导出文件或公证请求 JSON 写入仓库。
 - 不要在命令行中传递 `--password`，不要把凭据保存到 `.env`、shell history、CI log 或 Release 附件。
 - 发布时不要开启 `set -x`；如 shell 已开启 trace，先执行 `set +x`。
 - 需要重建 profile 时，使用 `xcrun notarytool store-credentials` 的交互式提示，不把密码写进命令。
+- 不要运行 `generate_keys -x` 将 Sparkle private key 导出到仓库、`dist/` 或普通临时目录。发布脚本只允许从 Keychain 读取并核对 public key。
 
 ## 1. 锁定版本与源码
 
 ```bash
-export VERSION="1.0.0"
+export VERSION="1.1.0"
 export TAG="v${VERSION}"
 export NOTARY_PROFILE="GPTPulseNotary"
 
@@ -85,12 +89,14 @@ umask 077
 4. 生成只包含 `GPT Pulse.app → Applications` 的拖拽安装 DMG。
 5. 签名 DMG，提交公证，等待 `Accepted`，然后对 DMG staple。
 6. 输出 SHA-256 校验文件。
+7. 从最终 staple 后的 DMG 生成 `appcast.xml`，验证版本、URL、长度与 Sparkle EdDSA 签名。
 
 预期产物：
 
 ```text
-dist/GPT-Pulse-1.0.0.dmg
-dist/GPT-Pulse-1.0.0.dmg.sha256
+dist/GPT-Pulse-1.1.0.dmg
+dist/GPT-Pulse-1.1.0.dmg.sha256
+dist/appcast.xml
 ```
 
 脚本只生成本地产物，不应自动创建 tag、推送 Git 或公开 GitHub Release。
@@ -113,14 +119,17 @@ xcrun notarytool log "<submission-id>" \
 ```bash
 DMG="dist/GPT-Pulse-${VERSION}.dmg"
 CHECKSUM="${DMG}.sha256"
+APPCAST="dist/appcast.xml"
 
 test -f "$DMG"
 test -f "$CHECKSUM"
+test -f "$APPCAST"
 (cd dist && shasum -a 256 -c "GPT-Pulse-${VERSION}.dmg.sha256")
 
 codesign --verify --strict --verbose=2 "$DMG"
 xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature -vv "$DMG"
+xmllint --noout "$APPCAST"
 ```
 
 以只读方式挂载 DMG，再验证内部 App：
@@ -145,9 +154,11 @@ rmdir "$MOUNT_POINT"
 
 最后做一次手动验收：
 
-- 打开 DMG，检查图标、背景、窗口尺寸和 `Applications` 快捷方式是否正确。
+- 如修改过安装视觉，先运行 `swift scripts/render_dmg_background.swift --preview .build/release/dmg-background-preview.png`，确认 1x/2x 背景可重复生成。
+- 打开 DMG，检查图标、背景、中央拖拽箭头、窗口尺寸和 `Applications` 快捷方式是否正确；两个未选中标签都应在浅色底板上清晰可读。
 - 将 App 拖入 `/Applications`，从该路径首次启动，确认 Gatekeeper 不报错。
 - 确认菜单栏计数、触边侧边栏、设置、通知与 Codex 任务跳转。
+- 右键菜单栏选择“检查更新…”，确认 Sparkle 能读取公开 feed；`v1.1.0` 是 bootstrap 版本，不应把“没有更高版本”误判为失败。
 - 确认 App 仍只读 Codex 数据，未安装插件时 SQLite/JSONL 降级路径可用。
 - 移除旧版本或明确核对运行中进程的 bundle 路径，避免把旧 App 的行为误判为新产物问题。
 
@@ -164,6 +175,7 @@ git push origin "$TAG"
 gh release create "$TAG" \
   "dist/GPT-Pulse-${VERSION}.dmg" \
   "dist/GPT-Pulse-${VERSION}.dmg.sha256" \
+  "dist/appcast.xml" \
   --repo zuuzii-org/gpt-pulse \
   --title "GPT Pulse ${TAG}" \
   --notes-file "docs/release-notes-v${VERSION}.md" \
@@ -190,6 +202,7 @@ gh release download "$TAG" \
   --dir "$VERIFY_DIR"
 
 (cd "$VERIFY_DIR" && shasum -a 256 -c "GPT-Pulse-${VERSION}.dmg.sha256")
+xmllint --noout "$VERIFY_DIR/appcast.xml"
 xcrun stapler validate "$VERIFY_DIR/GPT-Pulse-${VERSION}.dmg"
 spctl --assess --type open --context context:primary-signature -vv \
   "$VERIFY_DIR/GPT-Pulse-${VERSION}.dmg"
@@ -204,7 +217,15 @@ gh release edit "$TAG" \
   --latest
 ```
 
-公开后从 Release 页再下载一次 DMG，执行安装与首次启动烟雾测试。记录 Release URL 和最终 SHA-256，但不记录签名或公证凭据。
+公开后确认固定 feed 已切换到新版本，再从 Release 页下载一次 DMG，执行安装与首次启动烟雾测试：
+
+```bash
+curl -fL "https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml" \
+  -o "$VERIFY_DIR/latest-appcast.xml"
+cmp "$VERIFY_DIR/appcast.xml" "$VERIFY_DIR/latest-appcast.xml"
+```
+
+记录 Release URL 和最终 SHA-256，但不记录签名或公证凭据。
 
 ## 回滚与故障处理
 

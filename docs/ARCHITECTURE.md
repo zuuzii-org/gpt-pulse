@@ -74,13 +74,21 @@ V1 面向单机、单用户的 Codex Desktop。核心约束是：实时状态尽
 
 ## macOS 宿主
 
-- `NSStatusItem` 承载菜单栏计数。
+- `NSStatusItem` 承载固定图标区与双行计数；右键菜单的“检查更新…”只调用 Sparkle 标准 updater，不改变任务状态。
 - 自定义 `NSPanel` 承载 400px 侧边栏，并通过 SwiftUI 构建内容。
+- “正在运行 / 最近完成”使用独立 disclosure；展开状态写入 GPT Pulse 自有 `UserDefaults`，折叠组不进入键盘焦点顺序，也不清空任务行的 token 明细展开状态。
 - 面板展示来源分为 `statusItemClick`、`edgeHover` 与 `programmatic`。状态栏点击先提供 5 秒移入保护；一旦进入面板即转为 hover hold，离开后沿用 0.3 秒防抖。Timer 以递增 token 隔离，旧回调不得关闭新一轮展示。
 - 轻量轮询 `NSEvent.mouseLocation`，仅在右侧中间 60% 连续停留 200ms 后触发。
 - 触边计算使用显示器全局几何；相邻显示器覆盖的右边缘不视为可触发边缘。
 - 全屏检测只在指针已进入触发带时执行，避免持续扫描窗口列表。
 - 动画遵守 `accessibilityDisplayShouldReduceMotion`。
+
+## 更新边界
+
+- Sparkle 2 通过 Swift Package Manager 精确锁定。`SUFeedURL` 指向 GitHub Latest Release 的公开 `appcast.xml`；`SUPublicEDKey` 只包含可公开的 EdDSA public key，private key 只保存在发布机 Keychain。
+- 更新包在解压前校验 EdDSA，App 与 DMG 同时要求 Developer ID 签名、公证与 staple。appcast 必须从最终 staple 后的 DMG 生成，避免签名长度与实际公开字节不一致。
+- 更新检查不会附加 Codex 任务、项目路径或 transcript，也不启用 Sparkle system profiling。只有用户接受更新后才下载 appcast 引用的发布附件。
+- `v1.1.0` 是更新通道 bootstrap；没有 Sparkle 的旧版本必须手动安装一次。更新失败不得影响本地 task adapters、菜单栏计数或侧边栏。
 
 ## 兼容策略
 

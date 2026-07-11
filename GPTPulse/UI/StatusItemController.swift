@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreText
 
 enum StatusItemIndicatorState: Equatable {
     case normal
@@ -97,15 +98,12 @@ struct StatusItemPresentation: Equatable {
 @MainActor
 final class StatusItemController: NSObject {
     private static let statusItemWidth: CGFloat = 42
-    private static let menuIconSize = NSSize(width: 18, height: 18)
-    private static let countFontSize: CGFloat = 9
-    private static let countLineHeight: CGFloat = 9.5
-    private static let countBaselineOffset: CGFloat = 8
 
     var onTogglePanel: (() -> Void)?
     var onOpenAttentionTask: (() -> Void)?
     var onRefresh: (() -> Void)?
     var onOpenSettings: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
     var onQuit: (() -> Void)?
 
     var button: NSStatusBarButton? { statusItem.button }
@@ -113,6 +111,7 @@ final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let menuPresenter: (NSMenu, NSStatusBarButton) -> Void
     private let menu = NSMenu()
+    private let statusContentView = StatusItemContentView()
     private var attentionMenuItem: NSMenuItem?
     private var snapshotCancellable: AnyCancellable?
 
@@ -147,18 +146,18 @@ final class StatusItemController: NSObject {
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        let image = NSImage.statusMenuIcon
-        image.isTemplate = true
-        image.size = Self.menuIconSize
-        button.image = image
-        button.imagePosition = .imageLeading
-        button.imageScaling = .scaleProportionallyDown
-        if let cell = button.cell as? NSButtonCell {
-            cell.alignment = .center
-            cell.usesSingleLineMode = false
-            cell.wraps = true
-            cell.lineBreakMode = .byClipping
-        }
+
+        // NSStatusBarButton lays out its title as a single line. A multiline
+        // attributedTitle is therefore clipped differently across menu-bar
+        // heights and backing scales. Keep the button title-free and place a
+        // non-interactive, fixed-geometry view above the native button cell.
+        button.title = ""
+        button.attributedTitle = NSAttributedString()
+        button.image = nil
+        button.imagePosition = .noImage
+        statusContentView.frame = button.bounds
+        statusContentView.autoresizingMask = [.width, .height]
+        button.addSubview(statusContentView)
         button.setAccessibilityRole(.button)
         button.setAccessibilityHelp(
             "左键显示或隐藏任务面板；右键或“打开更多选项”操作显示菜单。"
@@ -201,6 +200,14 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
+        let checkForUpdatesItem = NSMenuItem(
+            title: "检查更新…",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        checkForUpdatesItem.target = self
+        menu.addItem(checkForUpdatesItem)
+
         let settingsItem = NSMenuItem(
             title: "设置…",
             action: #selector(openSettings),
@@ -208,6 +215,8 @@ final class StatusItemController: NSObject {
         )
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
             title: "退出 GPT Pulse",
@@ -222,49 +231,13 @@ final class StatusItemController: NSObject {
         guard let button = statusItem.button else { return }
 
         let presentation = StatusItemPresentation(snapshot: snapshot)
-        button.attributedTitle = attributedTitle(for: presentation)
+        statusContentView.update(
+            presentation: presentation,
+            activeColor: indicatorColor(for: presentation.indicatorState)
+        )
         button.setAccessibilityLabel(presentation.accessibilityLabel)
         button.toolTip = presentation.toolTip
         attentionMenuItem?.isHidden = !presentation.hasWaitingAction
-    }
-
-    private func attributedTitle(for presentation: StatusItemPresentation) -> NSAttributedString {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .center
-        paragraphStyle.lineBreakMode = .byClipping
-        paragraphStyle.minimumLineHeight = Self.countLineHeight
-        paragraphStyle.maximumLineHeight = Self.countLineHeight
-        paragraphStyle.lineSpacing = -0.5
-
-        let title = NSMutableAttributedString(
-            string: presentation.title,
-            attributes: [
-                .font: NSFont.monospacedDigitSystemFont(
-                    ofSize: Self.countFontSize,
-                    weight: .medium
-                ),
-                .foregroundColor: NSColor.labelColor,
-                .paragraphStyle: paragraphStyle,
-                // NSStatusBarButton reserves vertical title metrics for a
-                // single line. Lift the compact two-line stack so the lower
-                // glyphs retain optical padding instead of being cell-clipped.
-                .baselineOffset: Self.countBaselineOffset,
-            ]
-        )
-        title.addAttribute(
-            .foregroundColor,
-            value: indicatorColor(for: presentation.indicatorState),
-            range: NSRange(location: 0, length: (presentation.activeTitle as NSString).length)
-        )
-        title.addAttribute(
-            .foregroundColor,
-            value: NSColor.systemGreen,
-            range: NSRange(
-                location: (presentation.activeTitle as NSString).length + 1,
-                length: (presentation.recentCompletedTitle as NSString).length
-            )
-        )
-        return title
     }
 
     private func indicatorColor(for state: StatusItemIndicatorState) -> NSColor {
@@ -319,7 +292,160 @@ final class StatusItemController: NSObject {
         onOpenSettings?()
     }
 
+    @objc private func checkForUpdates() {
+        onCheckForUpdates?()
+    }
+
     @objc private func quit() {
         onQuit?()
+    }
+}
+
+/// Fixed status-item geometry, independent from NSButtonCell's single-line
+/// title layout. Returning nil from hitTest keeps all mouse handling on the
+/// underlying NSStatusBarButton (including right-click and accessibility).
+@MainActor
+final class StatusItemContentView: NSView {
+    private enum Layout {
+        static let horizontalInset: CGFloat = 2
+        static let iconSize = NSSize(width: 18, height: 18)
+        static let iconToMetricsSpacing: CGFloat = 2
+        static let metricsWidth: CGFloat = 18
+    }
+
+    private let iconView: NSImageView
+    private let metricsView = StatusItemMetricsView()
+
+    private(set) var activeTitle = "0"
+    private(set) var recentCompletedTitle = "0"
+
+    override init(frame frameRect: NSRect) {
+        let icon = NSImage.statusMenuIcon
+        icon.isTemplate = true
+        icon.size = Layout.iconSize
+
+        iconView = NSImageView(image: icon)
+        iconView.imageAlignment = .alignCenter
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.contentTintColor = .labelColor
+
+        super.init(frame: frameRect)
+        addSubview(iconView)
+        addSubview(metricsView)
+    }
+
+    convenience init() {
+        self.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+
+        let iconOriginY = floor((bounds.height - Layout.iconSize.height) / 2)
+        iconView.frame = NSRect(
+            x: Layout.horizontalInset,
+            y: iconOriginY,
+            width: Layout.iconSize.width,
+            height: Layout.iconSize.height
+        )
+        metricsView.frame = NSRect(
+            x: iconView.frame.maxX + Layout.iconToMetricsSpacing,
+            y: 0,
+            width: Layout.metricsWidth,
+            height: bounds.height
+        )
+    }
+
+    func update(presentation: StatusItemPresentation, activeColor: NSColor) {
+        activeTitle = presentation.activeTitle
+        recentCompletedTitle = presentation.recentCompletedTitle
+        metricsView.update(
+            activeTitle: activeTitle,
+            recentCompletedTitle: recentCompletedTitle,
+            activeColor: activeColor
+        )
+    }
+
+    var iconFrameForTesting: NSRect { iconView.frame }
+    var metricsFrameForTesting: NSRect { metricsView.frame }
+}
+
+@MainActor
+private final class StatusItemMetricsView: NSView {
+    private static let font = NSFont.monospacedDigitSystemFont(
+        ofSize: 8.5,
+        weight: .semibold
+    )
+
+    private var activeTitle = "0"
+    private var recentCompletedTitle = "0"
+    private var activeColor = NSColor.systemBlue
+
+    override var isOpaque: Bool { false }
+
+    func update(
+        activeTitle: String,
+        recentCompletedTitle: String,
+        activeColor: NSColor
+    ) {
+        self.activeTitle = activeTitle
+        self.recentCompletedTitle = recentCompletedTitle
+        self.activeColor = activeColor
+        needsDisplay = true
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let font = Self.font
+        let lineAdvance = font.ascender - font.descender + font.leading
+        let stackHeight = lineAdvance * 2
+        let bottomBaseline = ((bounds.height - stackHeight) / 2) - font.descender
+
+        draw(
+            recentCompletedTitle,
+            color: .systemGreen,
+            baseline: bottomBaseline
+        )
+        draw(
+            activeTitle,
+            color: activeColor,
+            baseline: bottomBaseline + lineAdvance
+        )
+    }
+
+    private func draw(_ title: String, color: NSColor, baseline: CGFloat) {
+        let attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: Self.font,
+                .foregroundColor: color,
+            ]
+        )
+        let line = CTLineCreateWithAttributedString(attributedTitle)
+        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let originX = round(((bounds.width - width) / 2) * scale) / scale
+
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        context.textMatrix = .identity
+        context.textPosition = CGPoint(x: originX, y: baseline)
+        CTLineDraw(line, context)
+        context.restoreGState()
     }
 }

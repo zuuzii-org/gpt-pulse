@@ -12,6 +12,9 @@ readonly APP_NAME="GPT Pulse.app"
 readonly APP_EXECUTABLE="GPT Pulse"
 readonly SCHEME="GPTPulse"
 readonly VOLUME_NAME="GPT Pulse"
+readonly SPARKLE_FEED_URL="https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml"
+readonly RELEASE_DOWNLOAD_ROOT="https://github.com/zuuzii-org/gpt-pulse/releases/download"
+readonly PROJECT_URL="https://github.com/zuuzii-org/gpt-pulse"
 
 STAGE="all"
 VERSION=""
@@ -26,6 +29,7 @@ ALLOW_DIRTY="${ALLOW_DIRTY:-0}"
 SKIP_FINDER_LAYOUT="${SKIP_FINDER_LAYOUT:-0}"
 NOTARY_POLL_INTERVAL="${NOTARY_POLL_INTERVAL:-15}"
 NOTARY_TIMEOUT="${NOTARY_TIMEOUT:-1800}"
+SPARKLE_ACCOUNT="${SPARKLE_ACCOUNT:-zuuzii}"
 
 DERIVED_DATA=""
 WORK_DIR=""
@@ -33,6 +37,12 @@ APP_PATH=""
 APP_ZIP_PATH=""
 DMG_PATH=""
 CHECKSUM_PATH=""
+APPCAST_PATH=""
+RELEASE_NOTES_PATH=""
+SPARKLE_BIN_DIR=""
+SPARKLE_GENERATE_KEYS=""
+SPARKLE_GENERATE_APPCAST=""
+SPARKLE_SIGN_UPDATE=""
 MOUNT_DIR=""
 MOUNTED=0
 RESOLVED_SIGNING_IDENTITY=""
@@ -50,10 +60,10 @@ Usage:
 
 Options:
   --stage NAME              all (default), build, notarize-app, package,
-                            notarize-dmg, verify, or checksum
+                            notarize-dmg, verify, appcast, or checksum
   --version VERSION         Expected CFBundleShortVersionString
   --output-dir PATH         Artifact directory (default: dist)
-  --background PATH         Optional 640x420 DMG background PNG
+  --background PATH         640x420 PNG with an adjacent 1280x840 @2x PNG
   --volume-icon PATH        Optional .icns file for the mounted DMG volume
   --notary-profile NAME     notarytool Keychain profile (default: GPTPulseNotary)
   --team-id ID              Restrict automatic certificate selection to a Team ID
@@ -66,7 +76,7 @@ Options:
 Environment equivalents:
   DRY_RUN, ALLOW_DIRTY, BACKGROUND_PATH, VOLUME_ICON_PATH, NOTARY_PROFILE,
   SIGNING_IDENTITY, TEAM_ID, SKIP_FINDER_LAYOUT, NOTARY_POLL_INTERVAL,
-  NOTARY_TIMEOUT
+  NOTARY_TIMEOUT, SPARKLE_ACCOUNT
 
 No Apple ID or password argument is accepted. Notarization always uses the
 named Keychain profile so credentials cannot appear in shell history or logs.
@@ -260,13 +270,19 @@ initialize_paths() {
   APP_ZIP_PATH="$WORK_DIR/GPT-Pulse-$VERSION-notarization.zip"
   DMG_PATH="$OUTPUT_DIR/GPT-Pulse-$VERSION.dmg"
   CHECKSUM_PATH="$DMG_PATH.sha256"
+  APPCAST_PATH="$OUTPUT_DIR/appcast.xml"
+  RELEASE_NOTES_PATH="$REPO_ROOT/docs/release-notes-v$VERSION.md"
+  SPARKLE_BIN_DIR="$DERIVED_DATA/SourcePackages/artifacts/sparkle/Sparkle/bin"
+  SPARKLE_GENERATE_KEYS="$SPARKLE_BIN_DIR/generate_keys"
+  SPARKLE_GENERATE_APPCAST="$SPARKLE_BIN_DIR/generate_appcast"
+  SPARKLE_SIGN_UPDATE="$SPARKLE_BIN_DIR/sign_update"
   MOUNT_DIR="$WORK_DIR/mount"
   MANIFEST_PATH="$WORK_DIR/release-manifest.plist"
 }
 
 validate_options() {
   case "$STAGE" in
-    all|build|notarize-app|app-notarize|package|notarize-dmg|dmg-notarize|verify|checksum) ;;
+    all|build|notarize-app|app-notarize|package|notarize-dmg|dmg-notarize|verify|appcast|checksum) ;;
     *) die "unsupported stage: $STAGE" ;;
   esac
   [[ "$NOTARY_POLL_INTERVAL" =~ ^[0-9]+$ ]] || die "NOTARY_POLL_INTERVAL must be an integer"
@@ -276,6 +292,7 @@ validate_options() {
   (( NOTARY_TIMEOUT >= NOTARY_POLL_INTERVAL )) || \
     die "NOTARY_TIMEOUT must be at least NOTARY_POLL_INTERVAL"
   [[ -n "$NOTARY_PROFILE" ]] || die "notary profile cannot be empty"
+  [[ -n "$SPARKLE_ACCOUNT" ]] || die "Sparkle keychain account cannot be empty"
   if [[ -n "$TEAM_ID" ]]; then
     [[ "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || die "TEAM_ID must be a 10-character Apple Team ID"
   fi
@@ -289,6 +306,55 @@ validate_options() {
     [[ -f "$VOLUME_ICON_PATH" ]] || die "DMG volume icon not found: $VOLUME_ICON_PATH"
     [[ "$VOLUME_ICON_PATH" == *.icns ]] || die "DMG volume icon must be an .icns file"
   fi
+}
+
+validate_dmg_background_assets() {
+  local background_2x width height width_2x height_2x format format_2x
+  [[ -n "$BACKGROUND_PATH" ]] || return
+
+  background_2x="${BACKGROUND_PATH%.*}@2x.${BACKGROUND_PATH##*.}"
+  if is_true "$DRY_RUN" && [[ ! -f "$BACKGROUND_PATH" || ! -f "$background_2x" ]]; then
+    log "[dry-run] require a 640x420 PNG and adjacent 1280x840 @2x PNG for the DMG background"
+    return
+  fi
+
+  require_file "$BACKGROUND_PATH"
+  require_file "$background_2x"
+  format="$(/usr/bin/sips -g format "$BACKGROUND_PATH" | /usr/bin/awk '/format:/{print $2}')"
+  width="$(/usr/bin/sips -g pixelWidth "$BACKGROUND_PATH" | /usr/bin/awk '/pixelWidth:/{print $2}')"
+  height="$(/usr/bin/sips -g pixelHeight "$BACKGROUND_PATH" | /usr/bin/awk '/pixelHeight:/{print $2}')"
+  format_2x="$(/usr/bin/sips -g format "$background_2x" | /usr/bin/awk '/format:/{print $2}')"
+  width_2x="$(/usr/bin/sips -g pixelWidth "$background_2x" | /usr/bin/awk '/pixelWidth:/{print $2}')"
+  height_2x="$(/usr/bin/sips -g pixelHeight "$background_2x" | /usr/bin/awk '/pixelHeight:/{print $2}')"
+
+  [[ "$format" == "png" && "$width" == "640" && "$height" == "420" ]] || \
+    die "DMG background must be a 640x420 PNG: $BACKGROUND_PATH"
+  [[ "$format_2x" == "png" && "$width_2x" == "1280" && "$height_2x" == "840" ]] || \
+    die "DMG Retina background must be a 1280x840 PNG: $background_2x"
+  log "validated 640x420 + 1280x840 Retina DMG backgrounds"
+}
+
+validate_source_sparkle_configuration() {
+  local feed_url public_key verify_before_extraction decoded_bytes
+  feed_url="$(/usr/bin/plutil -extract SUFeedURL raw -o - "$INFO_PLIST" 2>/dev/null || true)"
+  public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$INFO_PLIST" 2>/dev/null || true)"
+  verify_before_extraction="$(/usr/bin/plutil -extract SUVerifyUpdateBeforeExtraction raw -o - \
+    "$INFO_PLIST" 2>/dev/null || true)"
+
+  [[ "$feed_url" == "$SPARKLE_FEED_URL" ]] || \
+    die "unexpected Sparkle feed URL: $feed_url"
+  [[ -n "$public_key" ]] || die "SUPublicEDKey is missing"
+  decoded_bytes="$(printf '%s' "$public_key" | /usr/bin/base64 -D 2>/dev/null | /usr/bin/wc -c | /usr/bin/tr -d ' ')"
+  [[ "$decoded_bytes" == "32" ]] || die "SUPublicEDKey must decode to 32 bytes"
+  [[ "$verify_before_extraction" == "true" || "$verify_before_extraction" == "1" ]] || \
+    die "SUVerifyUpdateBeforeExtraction must be enabled"
+
+  if /usr/bin/plutil -extract SUEnableSystemProfiling raw -o - "$INFO_PLIST" \
+      >/dev/null 2>&1; then
+    [[ "$(/usr/bin/plutil -extract SUEnableSystemProfiling raw -o - "$INFO_PLIST")" != "true" ]] || \
+      die "Sparkle system profiling must remain disabled"
+  fi
+  log "validated Sparkle feed, EdDSA public key, and privacy settings"
 }
 
 require_clean_worktree() {
@@ -433,12 +499,14 @@ verify_app_signature() {
 verify_app_metadata() {
   local app="$1"
   local plist="$app/Contents/Info.plist"
+  local sparkle_framework="$app/Contents/Frameworks/Sparkle.framework"
   local bundle_id short_version build_version ui_element minimum_system
-  local source_build
+  local source_build feed_url public_key verify_before_extraction linked_framework
   require_file "$plist"
   require_file "$app/Contents/Resources/AppIcon.icns"
+  require_directory "$sparkle_framework"
   if is_true "$DRY_RUN"; then
-    log "[dry-run] verify bundle ID, version, build, LSUIElement, minimum macOS, and AppIcon.icns"
+    log "[dry-run] verify app metadata, Sparkle framework, feed, EdDSA key, and privacy settings"
     return
   fi
 
@@ -448,6 +516,9 @@ verify_app_metadata() {
   ui_element="$(/usr/bin/plutil -extract LSUIElement raw -o - "$plist")"
   minimum_system="$(/usr/bin/plutil -extract LSMinimumSystemVersion raw -o - "$plist")"
   source_build="$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$INFO_PLIST")"
+  feed_url="$(/usr/bin/plutil -extract SUFeedURL raw -o - "$plist")"
+  public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$plist")"
+  verify_before_extraction="$(/usr/bin/plutil -extract SUVerifyUpdateBeforeExtraction raw -o - "$plist")"
 
   [[ "$bundle_id" == "com.zuuzii.GPTPulse" ]] || die "unexpected bundle ID: $bundle_id"
   [[ "$short_version" == "$VERSION" ]] || die "unexpected app version: $short_version"
@@ -458,7 +529,51 @@ verify_app_metadata() {
     gsub(/[[:space:]]+$/, "", version)
     exit !(version == "14" || version == "14.0" || version == "14.0.0")
   }' || die "minimum macOS version must be exactly 14.0: $minimum_system"
-  log "verified app metadata and icon resources"
+  [[ "$feed_url" == "$SPARKLE_FEED_URL" ]] || die "unexpected bundled Sparkle feed: $feed_url"
+  [[ "$public_key" == "$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$INFO_PLIST")" ]] || \
+    die "bundled Sparkle public key differs from source"
+  [[ "$verify_before_extraction" == "true" || "$verify_before_extraction" == "1" ]] || \
+    die "bundled Sparkle archive verification is disabled"
+  if /usr/bin/plutil -extract SUEnableSystemProfiling raw -o - "$plist" >/dev/null 2>&1; then
+    [[ "$(/usr/bin/plutil -extract SUEnableSystemProfiling raw -o - "$plist")" != "true" ]] || \
+      die "bundled Sparkle system profiling must remain disabled"
+  fi
+  linked_framework="$(/usr/bin/otool -L "$app/Contents/MacOS/$APP_EXECUTABLE")"
+  [[ "$linked_framework" == *"@rpath/Sparkle.framework/"* ]] || \
+    die "main executable is not linked to the embedded Sparkle framework"
+  [[ -z "$(/usr/bin/find "$sparkle_framework" -name '*.xpc' -print -quit)" ]] || \
+    die "non-sandboxed release must not ship Sparkle XPC services"
+  log "verified app metadata, icon resources, and Sparkle update configuration"
+}
+
+prepare_sparkle_for_non_sandbox() {
+  local app="$1"
+  local sparkle_framework="$app/Contents/Frameworks/Sparkle.framework"
+  local xpc_path
+  require_directory "$sparkle_framework"
+
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] remove Sparkle XPC services for the non-sandboxed host app"
+    return
+  fi
+
+  while IFS= read -r -d '' xpc_path; do
+    case "$xpc_path" in
+      "$sparkle_framework"/Versions/*/XPCServices)
+        run /bin/rm -rf "$xpc_path"
+        ;;
+      *)
+        die "refusing to remove unexpected Sparkle XPC path: $xpc_path"
+        ;;
+    esac
+  done < <(/usr/bin/find "$sparkle_framework/Versions" -mindepth 2 -maxdepth 2 \
+    -type d -name XPCServices -print0)
+  if [[ -L "$sparkle_framework/XPCServices" ]]; then
+    run /bin/rm -f "$sparkle_framework/XPCServices"
+  fi
+  [[ -z "$(/usr/bin/find "$sparkle_framework" -name '*.xpc' -print -quit)" ]] || \
+    die "Sparkle XPC services remain after non-sandbox preparation"
+  log "prepared Sparkle for the non-sandboxed release host"
 }
 
 verify_dmg_signature() {
@@ -510,7 +625,7 @@ build_and_sign_app() {
   safe_remove_release_path "$DERIVED_DATA"
   safe_remove_release_path "$WORK_DIR"
   run /bin/mkdir -p "$OUTPUT_DIR"
-  run /bin/rm -f "$DMG_PATH" "$CHECKSUM_PATH"
+  run /bin/rm -f "$DMG_PATH" "$CHECKSUM_PATH" "$APPCAST_PATH"
 
   run "$(command -v xcodegen)" generate --spec "$PROJECT_SPEC"
   require_clean_worktree
@@ -520,6 +635,7 @@ build_and_sign_app() {
     -configuration Release \
     -destination 'generic/platform=macOS' \
     -derivedDataPath "$DERIVED_DATA" \
+    -onlyUsePackageVersionsFromResolvedFile \
     ARCHS='arm64 x86_64' \
     ONLY_ACTIVE_ARCH=NO \
     CODE_SIGNING_ALLOWED=NO \
@@ -533,6 +649,7 @@ build_and_sign_app() {
     [[ "$built_version" == "$VERSION" ]] || \
       die "built app version $built_version does not match $VERSION"
   fi
+  prepare_sparkle_for_non_sandbox "$APP_PATH"
   verify_universal_code "$APP_PATH"
   verify_app_metadata "$APP_PATH"
   sign_embedded_code "$APP_PATH"
@@ -639,7 +756,7 @@ apply_finder_layout() {
     return
   fi
   if is_true "$DRY_RUN"; then
-    log "[dry-run] apply 640x420 Finder layout with app and Applications icons"
+    log "[dry-run] apply 640x420 Finder layout with app, drag arrow, and Applications icons"
     return
   fi
 
@@ -666,7 +783,7 @@ on run argv
     set viewOptions to icon view options of dmgWindow
     set arrangement of viewOptions to not arranged
     set icon size of viewOptions to 112
-    set text size of viewOptions to 13
+    set text size of viewOptions to 14
     if backgroundName is not "" then
       set background picture of viewOptions to file (mountPath & "/.background/" & backgroundName) as POSIX file
     else
@@ -785,6 +902,109 @@ notarize_and_staple_dmg() {
   log "notarized DMG is stapled and accepted by Gatekeeper"
 }
 
+resolve_sparkle_tools_and_key() {
+  local expected_public_key keychain_public_key
+  expected_public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$INFO_PLIST")"
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] require Sparkle generate_keys, generate_appcast, and sign_update from resolved 2.9.4"
+    log "[dry-run] verify Keychain account $SPARKLE_ACCOUNT matches SUPublicEDKey"
+    return
+  fi
+
+  [[ -x "$SPARKLE_GENERATE_KEYS" ]] || die "Sparkle generate_keys not found: $SPARKLE_GENERATE_KEYS"
+  [[ -x "$SPARKLE_GENERATE_APPCAST" ]] || \
+    die "Sparkle generate_appcast not found: $SPARKLE_GENERATE_APPCAST"
+  [[ -x "$SPARKLE_SIGN_UPDATE" ]] || die "Sparkle sign_update not found: $SPARKLE_SIGN_UPDATE"
+  keychain_public_key="$("$SPARKLE_GENERATE_KEYS" --account "$SPARKLE_ACCOUNT" -p)"
+  [[ "$keychain_public_key" == "$expected_public_key" ]] || \
+    die "Sparkle Keychain account does not match SUPublicEDKey"
+  log "verified Sparkle tools and Keychain signing identity"
+}
+
+verify_appcast() {
+  local appcast="$1"
+  local version short_version minimum_system hardware_requirements
+  local update_url signature declared_length actual_length
+  require_file "$appcast"
+  require_file "$DMG_PATH"
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] verify appcast XML, version, URL, length, minimum macOS, and EdDSA signature"
+    return
+  fi
+
+  /usr/bin/xmllint --noout "$appcast" || die "generated appcast is not valid XML"
+  version="$(/usr/bin/xmllint --xpath \
+    "string((//*[local-name()='version'])[1])" "$appcast")"
+  short_version="$(/usr/bin/xmllint --xpath \
+    "string((//*[local-name()='shortVersionString'])[1])" "$appcast")"
+  minimum_system="$(/usr/bin/xmllint --xpath \
+    "string((//*[local-name()='minimumSystemVersion'])[1])" "$appcast")"
+  hardware_requirements="$(/usr/bin/xmllint --xpath \
+    "string((//*[local-name()='hardwareRequirements'])[1])" "$appcast")"
+  update_url="$(/usr/bin/xmllint --xpath \
+    "string((//*[local-name()='enclosure'])[1]/@url)" "$appcast")"
+  signature="$(/usr/bin/xmllint --xpath \
+    "string((//*[local-name()='enclosure'])[1]/@*[local-name()='edSignature'])" "$appcast")"
+  declared_length="$(/usr/bin/xmllint --xpath \
+    "string((//*[local-name()='enclosure'])[1]/@length)" "$appcast")"
+  actual_length="$(/usr/bin/stat -f %z "$DMG_PATH")"
+
+  [[ "$version" == "$SOURCE_BUILD" ]] || die "appcast build is $version, expected $SOURCE_BUILD"
+  [[ "$short_version" == "$VERSION" ]] || \
+    die "appcast version is $short_version, expected $VERSION"
+  /usr/bin/awk -v version="$minimum_system" 'BEGIN {
+    gsub(/^[[:space:]]+/, "", version)
+    gsub(/[[:space:]]+$/, "", version)
+    exit !(version == "14" || version == "14.0" || version == "14.0.0")
+  }' || die "appcast minimum macOS must be 14.0: $minimum_system"
+  if [[ -n "$hardware_requirements" ]]; then
+    [[ "$hardware_requirements" == *"arm64"* && "$hardware_requirements" == *"x86_64"* ]] || \
+      die "appcast unexpectedly restricts hardware: $hardware_requirements"
+  fi
+  [[ "$update_url" == "$RELEASE_DOWNLOAD_ROOT/v$VERSION/$(basename "$DMG_PATH")" ]] || \
+    die "unexpected appcast enclosure URL: $update_url"
+  [[ "$declared_length" == "$actual_length" ]] || \
+    die "appcast length $declared_length does not match DMG length $actual_length"
+  [[ -n "$signature" ]] || die "appcast enclosure has no EdDSA signature"
+  "$SPARKLE_SIGN_UPDATE" --account "$SPARKLE_ACCOUNT" --verify "$DMG_PATH" "$signature" || \
+    die "Sparkle EdDSA signature verification failed"
+  log "verified appcast metadata and Sparkle EdDSA update signature"
+}
+
+generate_and_verify_appcast() {
+  local source_dir="$WORK_DIR/appcast-source"
+  local source_dmg="$source_dir/$(basename "$DMG_PATH")"
+  local source_notes="$source_dir/GPT-Pulse-$VERSION.md"
+  local generated_appcast="$source_dir/appcast.xml"
+
+  log "generating Sparkle appcast from the final notarized DMG"
+  require_clean_worktree
+  validate_release_manifest
+  require_file "$DMG_PATH"
+  require_file "$RELEASE_NOTES_PATH"
+  run /usr/bin/xcrun stapler validate -v "$DMG_PATH"
+  verify_dmg_signature "$DMG_PATH"
+  resolve_sparkle_tools_and_key
+  safe_remove_release_path "$source_dir"
+  run /bin/mkdir -p "$source_dir" "$OUTPUT_DIR"
+  run /bin/rm -f "$APPCAST_PATH"
+  run /bin/cp "$DMG_PATH" "$source_dmg"
+  run /bin/cp "$RELEASE_NOTES_PATH" "$source_notes"
+  run "$SPARKLE_GENERATE_APPCAST" \
+    --account "$SPARKLE_ACCOUNT" \
+    --download-url-prefix "$RELEASE_DOWNLOAD_ROOT/v$VERSION/" \
+    --embed-release-notes \
+    --link "$PROJECT_URL" \
+    --versions "$SOURCE_BUILD" \
+    --maximum-versions 1 \
+    --maximum-deltas 0 \
+    -o "$generated_appcast" \
+    "$source_dir"
+  run /bin/cp "$generated_appcast" "$APPCAST_PATH"
+  verify_appcast "$APPCAST_PATH"
+  log "Sparkle appcast ready: $APPCAST_PATH"
+}
+
 verify_final_release() {
   local mounted_app="$MOUNT_DIR/$APP_NAME"
   local getfileinfo_path volume_attributes
@@ -847,7 +1067,7 @@ write_checksum() {
     cd "$OUTPUT_DIR"
     /usr/bin/shasum -a 256 "$dmg_basename" >"$checksum_basename"
   )
-  log "SHA-256 written last: $CHECKSUM_PATH"
+  log "SHA-256 written: $CHECKSUM_PATH"
 }
 
 preflight() {
@@ -864,13 +1084,19 @@ preflight() {
   require_command file
   require_command find
   require_command lipo
+  require_command otool
   require_command hdiutil
   require_command tiffutil
+  require_command sips
   require_command spctl
   require_command shasum
+  require_command xmllint
+  require_command base64
   if ! is_true "$SKIP_FINDER_LAYOUT"; then
     require_command osascript
   fi
+  validate_dmg_background_assets
+  validate_source_sparkle_configuration
   require_clean_worktree
   resolve_git_head
 }
@@ -884,6 +1110,7 @@ run_stage() {
       notarize_and_staple_dmg
       verify_final_release
       write_checksum
+      generate_and_verify_appcast
       ;;
     build)
       build_and_sign_app
@@ -900,6 +1127,10 @@ run_stage() {
     verify)
       verify_final_release
       write_checksum
+      generate_and_verify_appcast
+      ;;
+    appcast)
+      generate_and_verify_appcast
       ;;
     checksum)
       require_clean_worktree

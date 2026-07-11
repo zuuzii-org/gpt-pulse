@@ -16,6 +16,8 @@ final class PulseSettingsTests: XCTestCase {
         XCTAssertFalse(settings.notificationSoundEnabled)
         XCTAssertEqual(settings.notificationAttentionLevel, .attentionOnly)
         XCTAssertTrue(settings.mutedProjectExpirations.isEmpty)
+        XCTAssertTrue(settings.runningSectionExpanded)
+        XCTAssertTrue(settings.recentSectionExpanded)
         XCTAssertEqual(settings.edgeDwellDuration, 0.2)
         XCTAssertEqual(settings.panelDismissDelay, 0.3)
         XCTAssertEqual(settings.statusItemPanelDisplayDuration, 5)
@@ -31,6 +33,8 @@ final class PulseSettingsTests: XCTestCase {
         settings.edgeTriggerEnabled = false
         settings.notificationSoundEnabled = true
         settings.notificationAttentionLevel = .important
+        settings.runningSectionExpanded = false
+        settings.recentSectionExpanded = false
         let expiration = Date(timeIntervalSince1970: 1_900_000_000)
         settings.muteProject("/tmp/project", until: expiration)
         let persistedMuteKeys = defaults.dictionary(
@@ -43,6 +47,8 @@ final class PulseSettingsTests: XCTestCase {
         XCTAssertFalse(reloaded.edgeTriggerEnabled)
         XCTAssertTrue(reloaded.notificationSoundEnabled)
         XCTAssertEqual(reloaded.notificationAttentionLevel, .important)
+        XCTAssertFalse(reloaded.runningSectionExpanded)
+        XCTAssertFalse(reloaded.recentSectionExpanded)
         XCTAssertEqual(reloaded.mutedProjectExpirations.count, 1)
         XCTAssertTrue(
             reloaded.isProjectMuted(
@@ -89,6 +95,26 @@ final class PulseSettingsTests: XCTestCase {
 
         settings.clearProjectMutes()
         XCTAssertTrue(settings.mutedProjectExpirations.isEmpty)
+    }
+
+    func testPersistsSectionExpansionIndependently() {
+        let suiteName = "PulseSettingsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var settings = PulseSettings(defaults: defaults)
+        settings.runningSectionExpanded = false
+
+        settings = PulseSettings(defaults: defaults)
+        XCTAssertFalse(settings.runningSectionExpanded)
+        XCTAssertTrue(settings.recentSectionExpanded)
+
+        settings.runningSectionExpanded = true
+        settings.recentSectionExpanded = false
+
+        settings = PulseSettings(defaults: defaults)
+        XCTAssertTrue(settings.runningSectionExpanded)
+        XCTAssertFalse(settings.recentSectionExpanded)
     }
 
     func testMigratesLegacyPlaintextSubdirectoryMuteKeyToGitRoot() throws {

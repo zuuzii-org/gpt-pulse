@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>3</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
@@ -32,5 +32,11 @@
 	<string>Copyright © 2026 Zuuzii. Released under the MIT License.</string>
 	<key>NSUserNotificationAlertStyle</key>
 	<string>alert</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>KfJaN2A0IlsTLYrTChIqUzyQ5q1J79DySyB29chSLFw=</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>

@@ -6,12 +6,12 @@ generate:
 	xcodegen generate
 
 build: generate
-	xcodebuild -project GPTPulse.xcodeproj -scheme GPTPulse -configuration Debug -derivedDataPath $(DERIVED_DATA) CODE_SIGNING_ALLOWED=NO build
+	xcodebuild -project GPTPulse.xcodeproj -scheme GPTPulse -configuration Debug -derivedDataPath $(DERIVED_DATA) -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
 
 test: test-swift test-plugin
 
 test-swift: generate
-	xcodebuild -project GPTPulse.xcodeproj -scheme GPTPulse -configuration Debug -derivedDataPath $(DERIVED_DATA) CODE_SIGNING_ALLOWED=NO test
+	xcodebuild -project GPTPulse.xcodeproj -scheme GPTPulse -configuration Debug -derivedDataPath $(DERIVED_DATA) -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO test
 
 test-plugin:
 	python3 -m unittest discover -s Tests/Plugin -p 'test_*.py' -v

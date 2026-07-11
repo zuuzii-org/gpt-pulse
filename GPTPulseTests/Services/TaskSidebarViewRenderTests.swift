@@ -93,6 +93,77 @@ final class TaskSidebarViewRenderTests: XCTestCase {
         )
     }
 
+    func testSectionsCollapseIndependentlyInRenderedPanel() throws {
+        let suiteName = "TaskSidebarViewRenderTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = fixtureSnapshot(now: now)
+        let settings = PulseSettings(defaults: defaults)
+        let (hostingView, window) = makeHostedSidebar(snapshot: snapshot, settings: settings)
+        defer { tearDownHostedSidebar(hostingView, window: window) }
+        settle(hostingView, in: window)
+        let expanded = try renderBitmap(of: hostingView)
+
+        settings.runningSectionExpanded = false
+        settle(hostingView, in: window)
+        let recentOnly = try renderBitmap(of: hostingView)
+
+        settings.runningSectionExpanded = true
+        settings.recentSectionExpanded = false
+        settle(hostingView, in: window)
+        let runningOnly = try renderBitmap(of: hostingView)
+
+        settings.runningSectionExpanded = false
+        settle(hostingView, in: window)
+        let collapsed = try renderBitmap(of: hostingView)
+
+        XCTAssertGreaterThan(pixelDifference(expanded, recentOnly), 800)
+        XCTAssertGreaterThan(pixelDifference(expanded, runningOnly), 800)
+        XCTAssertGreaterThan(pixelDifference(recentOnly, collapsed), 800)
+        XCTAssertGreaterThan(pixelDifference(runningOnly, collapsed), 800)
+    }
+
+    func testCollapsedSectionsLeaveHiddenTasksOutOfFocusOrderAndPreserveRowExpansion() {
+        let runningIDs = ["waiting", "running"]
+        let recentIDs = ["complete-a", "complete-b"]
+
+        XCTAssertEqual(
+            TaskSidebarSectionState.visibleTaskIDs(
+                runningTaskIDs: runningIDs,
+                recentTaskIDs: recentIDs,
+                runningSectionExpanded: false,
+                recentSectionExpanded: true
+            ),
+            recentIDs
+        )
+        XCTAssertEqual(
+            TaskSidebarSectionState.visibleTaskIDs(
+                runningTaskIDs: runningIDs,
+                recentTaskIDs: recentIDs,
+                runningSectionExpanded: true,
+                recentSectionExpanded: false
+            ),
+            runningIDs
+        )
+        XCTAssertTrue(
+            TaskSidebarSectionState.visibleTaskIDs(
+                runningTaskIDs: runningIDs,
+                recentTaskIDs: recentIDs,
+                runningSectionExpanded: false,
+                recentSectionExpanded: false
+            ).isEmpty
+        )
+        XCTAssertEqual(
+            TaskSidebarSectionState.preservedExpandedTaskIDs(
+                ["running", "removed"],
+                existingTaskIDs: Set(runningIDs + recentIDs)
+            ),
+            ["running"]
+        )
+    }
+
     private func assertPaintedPanel(
         in bitmap: NSBitmapImageRep,
         file: StaticString = #filePath,
@@ -139,6 +210,97 @@ final class TaskSidebarViewRenderTests: XCTestCase {
         XCTAssertGreaterThan(greenCount, 20, file: file, line: line)
         XCTAssertGreaterThan(orangeCount, 20, file: file, line: line)
         XCTAssertGreaterThan(chromaticRows.count, 30, file: file, line: line)
+    }
+
+    private func makeHostedSidebar(
+        snapshot: TaskSnapshot,
+        settings: PulseSettings
+    ) -> (NSHostingView<TaskSidebarView>, NSWindow) {
+        let monitor = TaskMonitor(
+            repository: RenderTaskRepository(snapshot: snapshot),
+            initialSnapshot: snapshot
+        )
+        let view = TaskSidebarView(
+            monitor: monitor,
+            settings: settings,
+            onOpenTask: { _ in true },
+            onMarkViewed: { _ in },
+            onMarkAllViewed: { _ in true },
+            onUndoMarkViewed: { _ in true },
+            onDismiss: {},
+            onOpenSettings: {}
+        )
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = CGRect(x: 0, y: 0, width: 400, height: 900)
+        return (hostingView, makeWindow(hosting: hostingView))
+    }
+
+    private func makeWindow<Content: View>(hosting hostingView: NSHostingView<Content>) -> NSWindow {
+        let window = NSWindow(
+            contentRect: hostingView.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.orderFront(nil)
+        return window
+    }
+
+    private func settle<Content: View>(
+        _ hostingView: NSHostingView<Content>,
+        in window: NSWindow
+    ) {
+        for _ in 0..<3 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            window.layoutIfNeeded()
+            hostingView.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+        }
+    }
+
+    private func tearDownHostedSidebar<Content: View>(
+        _ hostingView: NSHostingView<Content>,
+        window: NSWindow
+    ) {
+        window.orderOut(nil)
+        window.contentView = nil
+    }
+
+    private func renderBitmap<Content: View>(
+        of hostingView: NSHostingView<Content>
+    ) throws -> NSBitmapImageRep {
+        let bitmap = try XCTUnwrap(
+            hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)
+        )
+        hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+        return bitmap
+    }
+
+    private func pixelDifference(
+        _ lhs: NSBitmapImageRep,
+        _ rhs: NSBitmapImageRep
+    ) -> Int {
+        guard lhs.pixelsWide == rhs.pixelsWide, lhs.pixelsHigh == rhs.pixelsHigh else {
+            return .max
+        }
+        let xStride = max(1, lhs.pixelsWide / 400)
+        let yStride = max(1, lhs.pixelsHigh / 900)
+        var difference = 0
+        for y in stride(from: 0, to: lhs.pixelsHigh, by: yStride) {
+            for x in stride(from: 0, to: lhs.pixelsWide, by: xStride) {
+                guard let left = lhs.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      let right = rhs.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+                    continue
+                }
+                let delta = abs(left.redComponent - right.redComponent)
+                    + abs(left.greenComponent - right.greenComponent)
+                    + abs(left.blueComponent - right.blueComponent)
+                    + abs(left.alphaComponent - right.alphaComponent)
+                if delta > 0.08 { difference += 1 }
+            }
+        }
+        return difference
     }
 
     private func fixtureSnapshot(now: Date) -> TaskSnapshot {

@@ -10,6 +10,7 @@ xcuserdata/
 # SwiftPM
 .swiftpm/
 Package.resolved
+!GPTPulse.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # Python
 __pycache__/

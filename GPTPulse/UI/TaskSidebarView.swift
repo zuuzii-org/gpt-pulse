@@ -215,13 +215,20 @@ struct TaskSidebarView: View {
         }
         .onChange(of: visibleAttentionTasks.map(\.id)) { _, taskIDs in
             guard let currentFocusedTaskID = focusedTaskID else { return }
-            let visibleTaskIDs = Set((runningTasks + recentTasks).map(\.id))
+            let visibleTaskIDs = Set(visibleFocusableTaskIDs)
             guard !visibleTaskIDs.contains(currentFocusedTaskID) else { return }
-            guard let firstTaskID = taskIDs.first else { return }
-            focusedTaskID = firstTaskID
+            focusedTaskID = settings.runningSectionExpanded
+                ? taskIDs.first ?? firstVisibleTaskID
+                : firstVisibleTaskID
         }
         .onChange(of: selectedProjectDirectory) { _, _ in
             focusFirstVisibleTask()
+        }
+        .onChange(of: settings.runningSectionExpanded) { _, _ in
+            preserveVisibleFocus()
+        }
+        .onChange(of: settings.recentSectionExpanded) { _, _ in
+            preserveVisibleFocus()
         }
         .onReceive(muteStateTimer) { date in
             muteStateDate = date
@@ -420,6 +427,9 @@ struct TaskSidebarView: View {
         TaskGroupSection(
             descriptor: descriptor,
             tasks: tasks,
+            isExpanded: descriptor.id == TaskGroupDescriptor.running.id
+                ? $settings.runningSectionExpanded
+                : $settings.recentSectionExpanded,
             focusedTaskID: $focusedTaskID,
             expandedTaskIDs: expandedTaskIDs,
             onOpenTask: openTask,
@@ -629,7 +639,23 @@ struct TaskSidebarView: View {
     }
 
     private var firstVisibleTaskID: String? {
-        (visibleAttentionTasks + runningTasks + recentTasks).first?.id
+        visibleFocusableTaskIDs.first
+    }
+
+    private var visibleFocusableTaskIDs: [String] {
+        TaskSidebarSectionState.visibleTaskIDs(
+            runningTaskIDs: runningTasks.map(\.id),
+            recentTaskIDs: recentTasks.map(\.id),
+            runningSectionExpanded: settings.runningSectionExpanded,
+            recentSectionExpanded: settings.recentSectionExpanded
+        )
+    }
+
+    private func preserveVisibleFocus() {
+        guard let focusedTaskID else { return }
+        let visibleTaskIDs = Set(visibleFocusableTaskIDs)
+        guard !visibleTaskIDs.contains(focusedTaskID) else { return }
+        self.focusedTaskID = firstVisibleTaskID
     }
 
     private func preserveValidFocusAndExpansion() {
@@ -640,9 +666,14 @@ struct TaskSidebarView: View {
 
         let taskIDs = Set((runningTasks + recentTasks).map(\.id))
         if let focusedTaskID, !taskIDs.contains(focusedTaskID) {
-            self.focusedTaskID = (runningTasks + recentTasks).first?.id
+            self.focusedTaskID = firstVisibleTaskID
+        } else {
+            preserveVisibleFocus()
         }
-        expandedTaskIDs.formIntersection(taskIDs)
+        expandedTaskIDs = TaskSidebarSectionState.preservedExpandedTaskIDs(
+            expandedTaskIDs,
+            existingTaskIDs: taskIDs
+        )
     }
 
     private func toggleExpanded(_ task: PulseTask) {
@@ -777,6 +808,25 @@ struct TaskSidebarView: View {
         } else {
             openErrorMessage = "无法在 Codex 中打开“\(task.title)”。请确认 Codex 桌面版已安装并可用。"
         }
+    }
+}
+
+enum TaskSidebarSectionState {
+    static func visibleTaskIDs(
+        runningTaskIDs: [String],
+        recentTaskIDs: [String],
+        runningSectionExpanded: Bool,
+        recentSectionExpanded: Bool
+    ) -> [String] {
+        (runningSectionExpanded ? runningTaskIDs : [])
+            + (recentSectionExpanded ? recentTaskIDs : [])
+    }
+
+    static func preservedExpandedTaskIDs(
+        _ expandedTaskIDs: Set<String>,
+        existingTaskIDs: Set<String>
+    ) -> Set<String> {
+        expandedTaskIDs.intersection(existingTaskIDs)
     }
 }
 
@@ -1000,6 +1050,7 @@ enum TaskStatusSourceAvailability {
 private struct TaskGroupSection: View {
     let descriptor: TaskGroupDescriptor
     let tasks: [PulseTask]
+    @Binding var isExpanded: Bool
     let focusedTaskID: FocusState<String?>.Binding
     let expandedTaskIDs: Set<String>
     let onOpenTask: (PulseTask) -> Void
@@ -1014,24 +1065,34 @@ private struct TaskGroupSection: View {
     let onMuteProjectUntilTomorrow: (PulseTask) -> Void
     let onUnmuteProject: (PulseTask) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Circle()
-                    .fill(descriptor.color)
-                    .frame(width: 8, height: 8)
-                    .accessibilityHidden(true)
+                DisclosureGroup(isExpanded: disclosureBinding) {
+                    EmptyView()
+                } label: {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(descriptor.color)
+                            .frame(width: 8, height: 8)
+                            .accessibilityHidden(true)
 
-                Text(descriptor.title)
-                    .font(.caption.weight(.semibold))
+                        Text(descriptor.title)
+                            .font(.caption.weight(.semibold))
 
-                Text("\(tasks.count)")
-                    .font(.caption.weight(.semibold))
-                    .fontDesign(.rounded)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-
-                Spacer()
+                        Text("\(tasks.count)")
+                            .font(.caption.weight(.semibold))
+                            .fontDesign(.rounded)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .disclosureGroupStyle(.automatic)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("task-group-\(descriptor.id)-disclosure")
 
                 if isMarkingAllViewed {
                     HStack(spacing: 5) {
@@ -1054,46 +1115,62 @@ private struct TaskGroupSection: View {
             }
             .padding(.horizontal, 2)
 
-            VStack(spacing: 0) {
-                if tasks.isEmpty {
-                    Text(descriptor.emptyMessage)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                } else {
-                    ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
-                        TaskListItem(
-                            task: task,
-                            isExpanded: expandedTaskIDs.contains(task.id),
-                            focusedTaskID: focusedTaskID,
-                            isProjectMuted: isProjectMuted(task),
-                            projectAccessibilityName: projectAccessibilityName(task),
-                            onOpenTask: { onOpenTask(task) },
-                            onToggleExpanded: { onToggleExpanded(task) },
-                            onMarkViewed: { onMarkViewed(task) },
-                            onFocusProject: { onFocusProject(task) },
-                            onMuteProjectForOneHour: { onMuteProjectForOneHour(task) },
-                            onMuteProjectUntilTomorrow: { onMuteProjectUntilTomorrow(task) },
-                            onUnmuteProject: { onUnmuteProject(task) }
-                        )
+            if isExpanded {
+                VStack(spacing: 0) {
+                    if tasks.isEmpty {
+                        Text(descriptor.emptyMessage)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                    } else {
+                        ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
+                            TaskListItem(
+                                task: task,
+                                isExpanded: expandedTaskIDs.contains(task.id),
+                                focusedTaskID: focusedTaskID,
+                                isProjectMuted: isProjectMuted(task),
+                                projectAccessibilityName: projectAccessibilityName(task),
+                                onOpenTask: { onOpenTask(task) },
+                                onToggleExpanded: { onToggleExpanded(task) },
+                                onMarkViewed: { onMarkViewed(task) },
+                                onFocusProject: { onFocusProject(task) },
+                                onMuteProjectForOneHour: { onMuteProjectForOneHour(task) },
+                                onMuteProjectUntilTomorrow: { onMuteProjectUntilTomorrow(task) },
+                                onUnmuteProject: { onUnmuteProject(task) }
+                            )
 
-                        if index < tasks.index(before: tasks.endIndex) {
-                            Divider()
-                                .opacity(0.42)
-                                .padding(.leading, 50)
+                            if index < tasks.index(before: tasks.endIndex) {
+                                Divider()
+                                    .opacity(0.42)
+                                    .padding(.leading, 50)
+                            }
                         }
                     }
                 }
-            }
-            .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 11))
-            .clipShape(RoundedRectangle(cornerRadius: 11))
-            .overlay {
-                RoundedRectangle(cornerRadius: 11)
-                    .stroke(Color.white.opacity(0.09), lineWidth: 1)
+                .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 11))
+                .clipShape(RoundedRectangle(cornerRadius: 11))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11)
+                        .stroke(Color.white.opacity(0.09), lineWidth: 1)
+                }
+                .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .top)))
             }
         }
+    }
+
+    private var disclosureBinding: Binding<Bool> {
+        Binding(
+            get: { isExpanded },
+            set: { expanded in
+                var transaction = Transaction()
+                transaction.animation = reduceMotion ? nil : .easeOut(duration: 0.18)
+                withTransaction(transaction) {
+                    isExpanded = expanded
+                }
+            }
+        )
     }
 }
 
@@ -1423,17 +1500,20 @@ private struct TokenBreakdownItem {
 }
 
 private struct TaskGroupDescriptor {
+    let id: String
     let title: String
     let color: Color
     let emptyMessage: String
 
     static let running = TaskGroupDescriptor(
+        id: "running",
         title: "正在运行",
         color: .blue,
         emptyMessage: "没有正在运行或等待操作的任务"
     )
 
     static let recent = TaskGroupDescriptor(
+        id: "recent",
         title: "最近完成",
         color: .green,
         emptyMessage: "还没有最近完成的任务"

@@ -38,6 +38,8 @@ enum PulsePreferenceKey {
     static let notificationSoundEnabled = "notificationSoundEnabled"
     static let notificationAttentionLevel = "notificationAttentionLevel"
     static let mutedProjectExpirations = "mutedProjectExpirations"
+    static let runningSectionExpanded = "runningSectionExpanded"
+    static let recentSectionExpanded = "recentSectionExpanded"
 }
 
 @MainActor
@@ -63,6 +65,24 @@ final class PulseSettings: ObservableObject {
             defaults.set(
                 notificationAttentionLevel.rawValue,
                 forKey: PulsePreferenceKey.notificationAttentionLevel
+            )
+        }
+    }
+
+    @Published var runningSectionExpanded: Bool {
+        didSet {
+            defaults.set(
+                runningSectionExpanded,
+                forKey: PulsePreferenceKey.runningSectionExpanded
+            )
+        }
+    }
+
+    @Published var recentSectionExpanded: Bool {
+        didSet {
+            defaults.set(
+                recentSectionExpanded,
+                forKey: PulsePreferenceKey.recentSectionExpanded
             )
         }
     }
@@ -97,6 +117,14 @@ final class PulseSettings: ObservableObject {
         notificationAttentionLevel = defaults.string(
             forKey: PulsePreferenceKey.notificationAttentionLevel
         ).flatMap(NotificationAttentionLevel.init(rawValue:)) ?? .attentionOnly
+        runningSectionExpanded = defaults.value(
+            forKey: PulsePreferenceKey.runningSectionExpanded,
+            default: true
+        )
+        recentSectionExpanded = defaults.value(
+            forKey: PulsePreferenceKey.recentSectionExpanded,
+            default: true
+        )
 
         let now = Date.now
         mutedProjectExpirations = defaults.dictionary(

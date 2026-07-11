@@ -1,10 +1,13 @@
 import AppKit
+import Sparkle
 
 @MainActor
 final class AppCoordinator {
     private let monitor: TaskMonitor
     private let settings: PulseSettings
     private let launchAtLogin: LaunchAtLoginService
+    private let updaterIsStarted: Bool
+    private let updaterController: SPUStandardUpdaterController
     private var notificationService: NotificationService!
     private var taskOpeningService: TaskOpeningService!
 
@@ -22,6 +25,15 @@ final class AppCoordinator {
         self.monitor = monitor
         self.settings = settings
         self.launchAtLogin = launchAtLogin
+        updaterIsStarted = !Self.isRunningTests
+        updaterController = SPUStandardUpdaterController(
+            // XCTest hosts must not schedule background checks or display
+            // Sparkle UI. Production starts immediately and preserves
+            // Sparkle's normal first/second-launch automatic-check flow.
+            startingUpdater: updaterIsStarted,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
 
         let navigator = TaskNavigator()
 
@@ -78,6 +90,10 @@ final class AppCoordinator {
         statusItemController.onOpenAttentionTask = { [weak self] in self?.openAttentionTask() }
         statusItemController.onRefresh = { [weak monitor] in monitor?.refresh() }
         statusItemController.onOpenSettings = { [weak self] in self?.openSettings() }
+        statusItemController.onCheckForUpdates = { [weak self] in
+            guard self?.updaterIsStarted == true else { return }
+            self?.updaterController.checkForUpdates(nil)
+        }
         statusItemController.onQuit = { NSApp.terminate(nil) }
         panelController.setOutsideDismissExcludedView(statusItemController.button)
 
@@ -201,5 +217,9 @@ final class AppCoordinator {
         panelController.hide()
         launchAtLogin.refresh()
         settingsWindowController.present()
+    }
+
+    private static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 }
