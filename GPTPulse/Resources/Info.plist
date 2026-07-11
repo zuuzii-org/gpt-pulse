@@ -35,7 +35,7 @@
 	<key>SUFeedURL</key>
 	<string>https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>KfJaN2A0IlsTLYrTChIqUzyQ5q1J79DySyB29chSLFw=</string>
+	<string>EGsMP5a2O3jD5mAuLHfkOx8S5z9GchRjuhIuwldAzdQ=</string>
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
 </dict>

@@ -85,7 +85,7 @@ V1 面向单机、单用户的 Codex Desktop。核心约束是：实时状态尽
 
 ## 更新边界
 
-- Sparkle 2 通过 Swift Package Manager 精确锁定。`SUFeedURL` 指向 GitHub Latest Release 的公开 `appcast.xml`；`SUPublicEDKey` 只包含可公开的 EdDSA public key，private key 只保存在发布机 Keychain。
+- Sparkle 2 通过 Swift Package Manager 精确锁定。`SUFeedURL` 指向 GitHub Latest Release 的公开 `appcast.xml`；`SUPublicEDKey` 只包含可公开的 EdDSA public key，private key 只保存在发布机仓库外的受限文件中，发布脚本也保留显式 Keychain 兼容模式。
 - 更新包在解压前校验 EdDSA，App 与 DMG 同时要求 Developer ID 签名、公证与 staple。appcast 必须从最终 staple 后的 DMG 生成，避免签名长度与实际公开字节不一致。
 - 更新检查不会附加 Codex 任务、项目路径或 transcript，也不启用 Sparkle system profiling。只有用户接受更新后才下载 appcast 引用的发布附件。
 - `v1.1.0` 是更新通道 bootstrap；没有 Sparkle 的旧版本必须手动安装一次。更新失败不得影响本地 task adapters、菜单栏计数或侧边栏。

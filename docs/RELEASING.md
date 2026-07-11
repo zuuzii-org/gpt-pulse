@@ -20,7 +20,7 @@
 - `gh` CLI，已登录且可向 `zuuzii-org/gpt-pulse` 推送 tag 和创建 Release。
 - 登录 Keychain 中可用的 Developer ID Application 证书。
 - Keychain 中名为 `GPTPulseNotary` 的 `notarytool` 凭据 profile。
-- Keychain 中 Sparkle account `zuuzii` 的 EdDSA private key；仓库只保存匹配的 public key。
+- 仓库外的 Sparkle EdDSA private-key 文件；默认路径为 `~/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key`。仓库只保存匹配的 public key。
 
 检查工具、身份与公证 profile：
 
@@ -30,19 +30,23 @@ xcodegen --version
 gh auth status
 security find-identity -v -p codesigning | grep -q "Developer ID Application"
 xcrun notarytool history --keychain-profile "GPTPulseNotary" >/dev/null
-.build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys \
-  --account zuuzii -p
+scripts/sparkle_key_tool.swift public-key \
+  "$HOME/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key"
 ```
 
 ### 凭据安全
 
-`GPTPulseNotary` 与 Sparkle account `zuuzii` 都只是 Keychain lookup 名，可以出现在命令或脚本中；实际凭据必须由 Keychain 保管。
+`GPTPulseNotary` 只是 Keychain lookup 名，可以出现在命令或脚本中；实际公证凭据仍由 Keychain 保管。Sparkle 私钥采用仓库外的文件模式，发布脚本默认 `SPARKLE_KEY_SOURCE=file`。
 
 - 不要把 Apple ID app-specific password、App Store Connect API `.p8` key、`.p12` 证书、Keychain 导出文件或公证请求 JSON 写入仓库。
 - 不要在命令行中传递 `--password`，不要把凭据保存到 `.env`、shell history、CI log 或 Release 附件。
 - 发布时不要开启 `set -x`；如 shell 已开启 trace，先执行 `set +x`。
 - 需要重建 profile 时，使用 `xcrun notarytool store-credentials` 的交互式提示，不把密码写进命令。
-- 不要运行 `generate_keys -x` 将 Sparkle private key 导出到仓库、`dist/` 或普通临时目录。发布脚本只允许从 Keychain 读取并核对 public key。
+- Sparkle key 文件必须由当前用户拥有、mode `0600`、hard-link count 为 1，父目录必须为 mode `0700`。不要把它放入仓库、`.build`、`dist`、`/tmp`、`/var/folders`、CloudStorage 或 Mobile Documents。
+- 不要把私钥内容放进 argv、环境变量、stdin、shell command substitution 或日志。`SPARKLE_PRIVATE_KEY_FILE` 只能保存路径。
+- 首次生成使用 `scripts/sparkle_key_tool.swift generate <absolute-path>`；该工具以 32-byte Ed25519 seed 新格式写入文件，拒绝覆盖、符号链接和弱权限。
+- Keychain 兼容模式必须显式设置 `SPARKLE_KEY_SOURCE=keychain`；文件模式发生任何错误都会立即停止，不会回退到 Keychain。
+- 在公开首个 Sparkle 版本前，为私钥制作一份独立加密备份，并从备份恢复验证相同的 `SUPublicEDKey`。丢失私钥会迫使用户手动安装后续版本。
 
 ## 1. 锁定版本与源码
 

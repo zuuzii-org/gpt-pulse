@@ -15,6 +15,7 @@ readonly VOLUME_NAME="GPT Pulse"
 readonly SPARKLE_FEED_URL="https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml"
 readonly RELEASE_DOWNLOAD_ROOT="https://github.com/zuuzii-org/gpt-pulse/releases/download"
 readonly PROJECT_URL="https://github.com/zuuzii-org/gpt-pulse"
+readonly DEFAULT_SPARKLE_PRIVATE_KEY_FILE="$HOME/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key"
 
 STAGE="all"
 VERSION=""
@@ -30,6 +31,8 @@ SKIP_FINDER_LAYOUT="${SKIP_FINDER_LAYOUT:-0}"
 NOTARY_POLL_INTERVAL="${NOTARY_POLL_INTERVAL:-15}"
 NOTARY_TIMEOUT="${NOTARY_TIMEOUT:-1800}"
 SPARKLE_ACCOUNT="${SPARKLE_ACCOUNT:-zuuzii}"
+SPARKLE_KEY_SOURCE="${SPARKLE_KEY_SOURCE:-file}"
+SPARKLE_PRIVATE_KEY_FILE="${SPARKLE_PRIVATE_KEY_FILE:-}"
 
 DERIVED_DATA=""
 WORK_DIR=""
@@ -42,7 +45,7 @@ RELEASE_NOTES_PATH=""
 SPARKLE_BIN_DIR=""
 SPARKLE_GENERATE_KEYS=""
 SPARKLE_GENERATE_APPCAST=""
-SPARKLE_SIGN_UPDATE=""
+SPARKLE_KEY_TOOL=""
 MOUNT_DIR=""
 MOUNTED=0
 RESOLVED_SIGNING_IDENTITY=""
@@ -76,7 +79,8 @@ Options:
 Environment equivalents:
   DRY_RUN, ALLOW_DIRTY, BACKGROUND_PATH, VOLUME_ICON_PATH, NOTARY_PROFILE,
   SIGNING_IDENTITY, TEAM_ID, SKIP_FINDER_LAYOUT, NOTARY_POLL_INTERVAL,
-  NOTARY_TIMEOUT, SPARKLE_ACCOUNT
+  NOTARY_TIMEOUT, SPARKLE_ACCOUNT, SPARKLE_KEY_SOURCE,
+  SPARKLE_PRIVATE_KEY_FILE
 
 No Apple ID or password argument is accepted. Notarization always uses the
 named Keychain profile so credentials cannot appear in shell history or logs.
@@ -264,6 +268,14 @@ initialize_paths() {
     VOLUME_ICON_PATH="$REPO_ROOT/Assets/Brand/GPTPulse.icns"
   fi
 
+  if [[ "$SPARKLE_KEY_SOURCE" == "file" ]]; then
+    if [[ -n "$SPARKLE_PRIVATE_KEY_FILE" ]]; then
+      SPARKLE_PRIVATE_KEY_FILE="$(absolute_from_repo "$SPARKLE_PRIVATE_KEY_FILE")"
+    else
+      SPARKLE_PRIVATE_KEY_FILE="$DEFAULT_SPARKLE_PRIVATE_KEY_FILE"
+    fi
+  fi
+
   DERIVED_DATA="$REPO_ROOT/.build/release/DerivedData"
   WORK_DIR="$REPO_ROOT/.build/release/work-v$VERSION"
   APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME"
@@ -275,7 +287,7 @@ initialize_paths() {
   SPARKLE_BIN_DIR="$DERIVED_DATA/SourcePackages/artifacts/sparkle/Sparkle/bin"
   SPARKLE_GENERATE_KEYS="$SPARKLE_BIN_DIR/generate_keys"
   SPARKLE_GENERATE_APPCAST="$SPARKLE_BIN_DIR/generate_appcast"
-  SPARKLE_SIGN_UPDATE="$SPARKLE_BIN_DIR/sign_update"
+  SPARKLE_KEY_TOOL="$REPO_ROOT/scripts/sparkle_key_tool.swift"
   MOUNT_DIR="$WORK_DIR/mount"
   MANIFEST_PATH="$WORK_DIR/release-manifest.plist"
 }
@@ -292,7 +304,13 @@ validate_options() {
   (( NOTARY_TIMEOUT >= NOTARY_POLL_INTERVAL )) || \
     die "NOTARY_TIMEOUT must be at least NOTARY_POLL_INTERVAL"
   [[ -n "$NOTARY_PROFILE" ]] || die "notary profile cannot be empty"
-  [[ -n "$SPARKLE_ACCOUNT" ]] || die "Sparkle keychain account cannot be empty"
+  case "$SPARKLE_KEY_SOURCE" in
+    file|keychain) ;;
+    *) die "SPARKLE_KEY_SOURCE must be file or keychain" ;;
+  esac
+  if [[ "$SPARKLE_KEY_SOURCE" == "keychain" ]]; then
+    [[ -n "$SPARKLE_ACCOUNT" ]] || die "Sparkle keychain account cannot be empty"
+  fi
   if [[ -n "$TEAM_ID" ]]; then
     [[ "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || die "TEAM_ID must be a 10-character Apple Team ID"
   fi
@@ -305,6 +323,22 @@ validate_options() {
   if [[ -n "$VOLUME_ICON_PATH" ]]; then
     [[ -f "$VOLUME_ICON_PATH" ]] || die "DMG volume icon not found: $VOLUME_ICON_PATH"
     [[ "$VOLUME_ICON_PATH" == *.icns ]] || die "DMG volume icon must be an .icns file"
+  fi
+  if [[ "$SPARKLE_KEY_SOURCE" == "file" ]]; then
+    [[ -n "$SPARKLE_PRIVATE_KEY_FILE" ]] || die "Sparkle private-key file cannot be empty"
+    case "$SPARKLE_PRIVATE_KEY_FILE" in
+      "$REPO_ROOT"|"$REPO_ROOT/"*|/tmp|/tmp/*|/private/tmp|/private/tmp/*|/var/folders|/var/folders/*)
+        die "Sparkle private key must remain outside the repository and temporary directories"
+        ;;
+      "$HOME/Library/CloudStorage"|"$HOME/Library/CloudStorage/"*|\
+      "$HOME/Library/Mobile Documents"|"$HOME/Library/Mobile Documents/"*)
+        die "Sparkle private key must not be stored in a cloud-synchronized directory"
+        ;;
+    esac
+    [[ -f "$SPARKLE_PRIVATE_KEY_FILE" ]] || \
+      die "Sparkle private-key file not found: $SPARKLE_PRIVATE_KEY_FILE"
+  elif [[ -n "$SPARKLE_PRIVATE_KEY_FILE" ]]; then
+    die "SPARKLE_PRIVATE_KEY_FILE cannot be set when SPARKLE_KEY_SOURCE=keychain"
   fi
 }
 
@@ -355,6 +389,27 @@ validate_source_sparkle_configuration() {
       die "Sparkle system profiling must remain disabled"
   fi
   log "validated Sparkle feed, EdDSA public key, and privacy settings"
+}
+
+validate_file_backed_sparkle_key() {
+  local expected_public_key actual_public_key
+  if [[ "$SPARKLE_KEY_SOURCE" != "file" ]]; then
+    return 0
+  fi
+
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] verify private-key ownership, mode, format, and SUPublicEDKey match"
+    return
+  fi
+
+  [[ -x "$SPARKLE_KEY_TOOL" ]] || die "Sparkle key tool is missing or not executable"
+  expected_public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$INFO_PLIST")"
+  if ! actual_public_key="$("$SPARKLE_KEY_TOOL" public-key "$SPARKLE_PRIVATE_KEY_FILE")"; then
+    die "Sparkle private-key file failed ownership, permission, or format validation"
+  fi
+  [[ "$actual_public_key" == "$expected_public_key" ]] || \
+    die "Sparkle private-key file does not match SUPublicEDKey"
+  log "validated file-backed Sparkle signing key"
 }
 
 stage_requires_notarization() {
@@ -930,15 +985,25 @@ resolve_sparkle_tools_and_key() {
   local expected_public_key keychain_public_key
   expected_public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$INFO_PLIST")"
   if is_true "$DRY_RUN"; then
-    log "[dry-run] require Sparkle generate_keys, generate_appcast, and sign_update from resolved 2.9.4"
-    log "[dry-run] verify Keychain account $SPARKLE_ACCOUNT matches SUPublicEDKey"
+    log "[dry-run] require Sparkle generate_appcast from resolved 2.9.4"
+    if [[ "$SPARKLE_KEY_SOURCE" == "file" ]]; then
+      log "[dry-run] use the validated file-backed Sparkle signing key"
+    else
+      log "[dry-run] verify Keychain account $SPARKLE_ACCOUNT matches SUPublicEDKey"
+    fi
+    return
+  fi
+
+  [[ -x "$SPARKLE_GENERATE_APPCAST" ]] || \
+    die "Sparkle generate_appcast not found: $SPARKLE_GENERATE_APPCAST"
+
+  if [[ "$SPARKLE_KEY_SOURCE" == "file" ]]; then
+    validate_file_backed_sparkle_key
+    log "verified Sparkle tools and file-backed signing key"
     return
   fi
 
   [[ -x "$SPARKLE_GENERATE_KEYS" ]] || die "Sparkle generate_keys not found: $SPARKLE_GENERATE_KEYS"
-  [[ -x "$SPARKLE_GENERATE_APPCAST" ]] || \
-    die "Sparkle generate_appcast not found: $SPARKLE_GENERATE_APPCAST"
-  [[ -x "$SPARKLE_SIGN_UPDATE" ]] || die "Sparkle sign_update not found: $SPARKLE_SIGN_UPDATE"
   keychain_public_key="$("$SPARKLE_GENERATE_KEYS" --account "$SPARKLE_ACCOUNT" -p)"
   [[ "$keychain_public_key" == "$expected_public_key" ]] || \
     die "Sparkle Keychain account does not match SUPublicEDKey"
@@ -948,7 +1013,7 @@ resolve_sparkle_tools_and_key() {
 verify_appcast() {
   local appcast="$1"
   local version short_version minimum_system hardware_requirements
-  local update_url signature declared_length actual_length
+  local update_url signature declared_length actual_length expected_public_key
   require_file "$appcast"
   require_file "$DMG_PATH"
   if is_true "$DRY_RUN"; then
@@ -990,8 +1055,9 @@ verify_appcast() {
   [[ "$declared_length" == "$actual_length" ]] || \
     die "appcast length $declared_length does not match DMG length $actual_length"
   [[ -n "$signature" ]] || die "appcast enclosure has no EdDSA signature"
-  "$SPARKLE_SIGN_UPDATE" --account "$SPARKLE_ACCOUNT" --verify "$DMG_PATH" "$signature" || \
-    die "Sparkle EdDSA signature verification failed"
+  expected_public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$INFO_PLIST")"
+  "$SPARKLE_KEY_TOOL" verify "$expected_public_key" "$DMG_PATH" "$signature" >/dev/null || \
+    die "Sparkle EdDSA signature verification failed against SUPublicEDKey"
   log "verified appcast metadata and Sparkle EdDSA update signature"
 }
 
@@ -1014,16 +1080,29 @@ generate_and_verify_appcast() {
   run /bin/rm -f "$APPCAST_PATH"
   run /bin/cp "$DMG_PATH" "$source_dmg"
   run /bin/cp "$RELEASE_NOTES_PATH" "$source_notes"
-  run "$SPARKLE_GENERATE_APPCAST" \
-    --account "$SPARKLE_ACCOUNT" \
-    --download-url-prefix "$RELEASE_DOWNLOAD_ROOT/v$VERSION/" \
-    --embed-release-notes \
-    --link "$PROJECT_URL" \
-    --versions "$SOURCE_BUILD" \
-    --maximum-versions 1 \
-    --maximum-deltas 0 \
-    -o "$generated_appcast" \
-    "$source_dir"
+  if [[ "$SPARKLE_KEY_SOURCE" == "file" ]]; then
+    run "$SPARKLE_GENERATE_APPCAST" \
+      --ed-key-file "$SPARKLE_PRIVATE_KEY_FILE" \
+      --download-url-prefix "$RELEASE_DOWNLOAD_ROOT/v$VERSION/" \
+      --embed-release-notes \
+      --link "$PROJECT_URL" \
+      --versions "$SOURCE_BUILD" \
+      --maximum-versions 1 \
+      --maximum-deltas 0 \
+      -o "$generated_appcast" \
+      "$source_dir"
+  else
+    run "$SPARKLE_GENERATE_APPCAST" \
+      --account "$SPARKLE_ACCOUNT" \
+      --download-url-prefix "$RELEASE_DOWNLOAD_ROOT/v$VERSION/" \
+      --embed-release-notes \
+      --link "$PROJECT_URL" \
+      --versions "$SOURCE_BUILD" \
+      --maximum-versions 1 \
+      --maximum-deltas 0 \
+      -o "$generated_appcast" \
+      "$source_dir"
+  fi
   run /bin/cp "$generated_appcast" "$APPCAST_PATH"
   verify_appcast "$APPCAST_PATH"
   log "Sparkle appcast ready: $APPCAST_PATH"
@@ -1121,6 +1200,7 @@ preflight() {
   fi
   validate_dmg_background_assets
   validate_source_sparkle_configuration
+  validate_file_backed_sparkle_key
   require_clean_worktree
   resolve_git_head
   validate_notary_profile
