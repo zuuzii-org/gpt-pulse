@@ -21,7 +21,9 @@ final class PulseTaskPresentationTests: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        XCTAssertEqual(makeTask(projectDirectory: nestedDirectory.path).projectDisplayName, "gpt-pulse")
+        let task = makeTask(projectDirectory: nestedDirectory.path)
+        XCTAssertEqual(task.projectDisplayName, "gpt-pulse")
+        XCTAssertEqual(task.projectIdentityDirectory, repository.path)
     }
 
     func testProjectDisplayNameFallsBackToWorkingDirectoryAndHandlesMissingPath() {

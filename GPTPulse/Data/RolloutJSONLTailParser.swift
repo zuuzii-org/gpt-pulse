@@ -315,14 +315,21 @@ struct RolloutJSONLTailParser: Sendable {
             return current
         }
 
-        var fiveHour = current?.fiveHour
-        var weekly = current?.weekly
+        let incomingLimitID = JSONValueSupport.string(object["limit_id"])
+        let identityChanged = incomingLimitID.map { $0 != current?.limitID } ?? false
+        // Keep every rate-limit event atomic. Carrying one missing window from
+        // an earlier event can manufacture a reset tuple that Codex never sent.
+        var fiveHour: RateLimitWindowSnapshot?
+        var weekly: RateLimitWindowSnapshot?
         var foundSupportedWindow = false
 
         for key in ["primary", "secondary"] {
             guard
                 let windowObject = object[key] as? [String: Any],
-                let window = parseRateLimitWindow(from: windowObject)
+                let window = parseRateLimitWindow(
+                    from: windowObject,
+                    observedAt: eventTimestamp
+                )
             else {
                 continue
             }
@@ -339,17 +346,48 @@ struct RolloutJSONLTailParser: Sendable {
             }
         }
 
-        guard foundSupportedWindow else { return current }
+        guard foundSupportedWindow, let fiveHour, let weekly else { return current }
+        let effectiveLimitID = incomingLimitID ?? current?.limitID
+        let sameIdentity = current?.limitID?.lowercased() == effectiveLimitID?.lowercased()
+        var conflictUntil = sameIdentity ? current?.conflictingResetHistoryUntil : nil
+        if conflictUntil.map({ $0 <= eventTimestamp }) == true {
+            conflictUntil = nil
+        }
+        if sameIdentity,
+           let currentFiveHour = current?.fiveHour,
+           let currentWeekly = current?.weekly
+        {
+            if currentFiveHour.resetsAt > eventTimestamp,
+               abs(currentFiveHour.resetsAt.timeIntervalSince(fiveHour.resetsAt)) > 60
+            {
+                conflictUntil = max(
+                    conflictUntil ?? .distantPast,
+                    max(currentFiveHour.resetsAt, fiveHour.resetsAt)
+                )
+            }
+            if currentWeekly.resetsAt > eventTimestamp,
+               abs(currentWeekly.resetsAt.timeIntervalSince(weekly.resetsAt)) > 60
+            {
+                conflictUntil = max(
+                    conflictUntil ?? .distantPast,
+                    max(currentWeekly.resetsAt, weekly.resetsAt)
+                )
+            }
+        }
         return RateLimitSnapshot(
             fiveHour: fiveHour,
             weekly: weekly,
             updatedAt: eventTimestamp,
-            planType: JSONValueSupport.string(object["plan_type"]) ?? current?.planType
+            planType: JSONValueSupport.string(object["plan_type"])
+                ?? (identityChanged ? nil : current?.planType),
+            limitID: effectiveLimitID,
+            conflictingResetHistoryUntil: conflictUntil
         )
     }
 
     private func parseRateLimitWindow(
-        from object: [String: Any]
+        from object: [String: Any],
+        observedAt: Date
     ) -> RateLimitWindowSnapshot? {
         guard
             let usedPercent = JSONValueSupport.double(object["used_percent"]),
@@ -363,7 +401,8 @@ struct RolloutJSONLTailParser: Sendable {
         return RateLimitWindowSnapshot(
             usedPercent: usedPercent,
             windowMinutes: windowMinutes,
-            resetsAt: resetsAt
+            resetsAt: resetsAt,
+            observedAt: observedAt
         )
     }
 

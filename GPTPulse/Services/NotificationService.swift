@@ -40,6 +40,32 @@ enum PulseNotificationKind: String {
             return "任务已中断"
         }
     }
+
+    var categoryIdentifier: String {
+        switch self {
+        case .waitingForApproval, .waitingForAnswer:
+            return PulseNotificationCategory.actionableTask
+        case .completed:
+            return PulseNotificationCategory.completedTask
+        case .failed, .interrupted:
+            return PulseNotificationCategory.terminalTask
+        }
+    }
+}
+
+extension NotificationAttentionLevel {
+    func allows(_ kind: PulseNotificationKind) -> Bool {
+        switch self {
+        case .attentionOnly:
+            return kind == .waitingForApproval
+                || kind == .waitingForAnswer
+                || kind == .failed
+        case .important:
+            return kind != .interrupted
+        case .all:
+            return true
+        }
+    }
 }
 
 struct TaskNotificationRoute: Equatable, Sendable {
@@ -67,25 +93,184 @@ struct TaskNotificationRoute: Equatable, Sendable {
     }
 }
 
+struct RateLimitNotificationAlert: Equatable, Sendable {
+    let windowTitle: String
+    let windowMinutes: Int
+    let remainingPercent: Int
+    let threshold: Int
+    let resetsAt: Date
+    let scopeKey: String
+    let receiptKeys: Set<String>
+
+    var identifier: String {
+        let resetTimestamp = Int(resetsAt.timeIntervalSince1970)
+        return "gpt-pulse.quota.\(scopeKey).\(windowMinutes).\(resetTimestamp).\(threshold)"
+    }
+}
+
+enum QuotaNotificationScope {
+    static func key(for planType: String?) -> String {
+        let value = planType?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value, !value.isEmpty else { return "unknown" }
+        return value
+            .lowercased()
+            .replacingOccurrences(of: "|", with: "_")
+            .replacingOccurrences(of: ".", with: "_")
+    }
+}
+
+struct CompletionNotificationSummary: Equatable, Sendable {
+    let title: String
+    let subtitle: String
+    let body: String
+
+    init(tasks: [PulseTask]) {
+        let projectCount = Set(tasks.map(\.projectIdentityDirectory)).count
+        let summaryTitles = tasks.prefix(3).map {
+            "\($0.projectDisplayName) · \($0.title)"
+        }
+        title = "\(tasks.count) 个任务已完成"
+        subtitle = projectCount == 1 ? "同一项目" : "来自 \(projectCount) 个项目"
+        body = summaryTitles.joined(separator: "；")
+            + (tasks.count > summaryTitles.count ? "；…" : "")
+    }
+}
+
+enum PulseNotificationAction {
+    static let openTask = "GPT_PULSE_OPEN_TASK"
+    static let openPanel = "GPT_PULSE_OPEN_PANEL"
+    static let snooze15Minutes = "GPT_PULSE_SNOOZE_15_MINUTES"
+    static let snoozeOneHour = "GPT_PULSE_SNOOZE_ONE_HOUR"
+    static let markViewed = "GPT_PULSE_MARK_VIEWED"
+}
+
+enum PulseNotificationCategory {
+    static let actionableTask = "GPT_PULSE_TASK_ACTIONABLE"
+    static let completedTask = "GPT_PULSE_TASK_COMPLETED"
+    static let terminalTask = "GPT_PULSE_TASK_TERMINAL"
+    static let completionSummary = "GPT_PULSE_COMPLETION_SUMMARY"
+    static let quota = "GPT_PULSE_QUOTA"
+}
+
+enum NotificationPostOutcome: Equatable {
+    case delivered
+    case suppressed
+    case retryable
+}
+
+enum TaskNotificationSnapshotReliability {
+    static func mayBeIncomplete(_ snapshot: TaskSnapshot) -> Bool {
+        // Task existence and terminal state are rooted in rollout data. A
+        // degraded rollout read may omit only some files, while receipts and
+        // optional app/plugin sources do not define task-list completeness.
+        snapshot.health.contains {
+            $0.adapter == .rolloutJSONL && $0.status != .healthy
+        }
+    }
+}
+
+@MainActor
+enum SnoozeNotificationPolicy {
+    static func shouldKeep(
+        userInfo: [AnyHashable: Any],
+        snapshot: TaskSnapshot,
+        settings: PulseSettings,
+        asOf date: Date
+    ) -> Bool {
+        guard settings.notificationsEnabled else { return false }
+
+        if let route = TaskNotificationRoute(userInfo: userInfo),
+           let rawKind = userInfo["notificationKind"] as? String,
+           let kind = PulseNotificationKind(rawValue: rawKind) {
+            guard settings.notificationAttentionLevel.allows(kind) else {
+                return false
+            }
+            guard let task = snapshot.tasks.first(where: { $0.id == route.taskID }) else {
+                // A temporary source outage can make only part of the task list
+                // disappear. Keep the snooze until a healthy snapshot can
+                // authoritatively say that the task no longer exists.
+                return TaskNotificationSnapshotReliability.mayBeIncomplete(snapshot)
+            }
+            guard
+                  PulseNotificationKind(state: task.state) == kind,
+                  !(kind == .completed && !task.isUnread),
+                  !settings.isProjectMuted(task.projectIdentityDirectory, asOf: date) else {
+                return false
+            }
+            return true
+        }
+
+        if userInfo["notificationType"] as? String == "quota" {
+            guard let windowValue = userInfo["windowMinutes"] as? String,
+                  let windowMinutes = Int(windowValue),
+                  let resetValue = userInfo["resetsAt"] as? String,
+                  let resetTimestamp = Int(resetValue),
+                  Date(timeIntervalSince1970: TimeInterval(resetTimestamp)) > date,
+                  let thresholdValue = userInfo["threshold"] as? String,
+                  let threshold = Double(thresholdValue)
+            else {
+                return false
+            }
+            guard let rateLimits = snapshot.rateLimits else {
+                return snapshot.health.contains {
+                    ($0.adapter == .appServer || $0.adapter == .rolloutJSONL)
+                        && $0.status != .healthy
+                }
+            }
+            if let originalScope = userInfo["quotaScope"] as? String,
+               originalScope != QuotaNotificationScope.key(for: rateLimits.planType) {
+                return false
+            }
+            let window = windowMinutes == 300 ? rateLimits.fiveHour : rateLimits.weekly
+            guard let window,
+                  RateLimitResetSemantics.representsSameWindow(
+                      window.resetsAt,
+                      Date(timeIntervalSince1970: TimeInterval(resetTimestamp))
+                  ),
+                  let remaining = window.remainingPercent(asOf: date),
+                  remaining <= threshold else {
+                return false
+            }
+            // Usage is monotonic inside one reset window. Once the threshold was
+            // crossed, stale telemetry must not delete a one-hour snooze before
+            // its trigger fires; a reset/window change still invalidates it.
+            return true
+        }
+
+        return false
+    }
+}
+
 @MainActor
 final class NotificationService {
     private let center: UNUserNotificationCenter
     private let settings: PulseSettings
     private let delegateBridge: NotificationDelegateBridge
+    private let onOpenTask: @MainActor (TaskNotificationRoute) -> Void
+    private let onMarkViewed: @MainActor (TaskNotificationRoute) async -> Void
+    private let onOpenPanel: @MainActor () -> Void
+
+    var isEnabled: Bool { settings.notificationsEnabled }
 
     init(
         settings: PulseSettings,
         onOpenTask: @escaping @MainActor (TaskNotificationRoute) -> Void,
+        onMarkViewed: @escaping @MainActor (TaskNotificationRoute) async -> Void,
+        onOpenPanel: @escaping @MainActor () -> Void,
         center: UNUserNotificationCenter = .current()
     ) {
         self.settings = settings
         self.center = center
-        delegateBridge = NotificationDelegateBridge { route in
-            Task { @MainActor in
-                onOpenTask(route)
-            }
+        self.onOpenTask = onOpenTask
+        self.onMarkViewed = onMarkViewed
+        self.onOpenPanel = onOpenPanel
+
+        delegateBridge = NotificationDelegateBridge()
+        delegateBridge.onResponse = { [weak self] response in
+            await self?.handle(response)
         }
         center.delegate = delegateBridge
+        registerCategories()
     }
 
     func requestAuthorizationIfNeeded() async {
@@ -97,27 +282,42 @@ final class NotificationService {
         _ = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
     }
 
-    func post(task: PulseTask, kind: PulseNotificationKind) async {
-        guard settings.notificationsEnabled else { return }
+    @discardableResult
+    func post(
+        task: PulseTask,
+        kind: PulseNotificationKind
+    ) async -> NotificationPostOutcome {
+        guard settings.notificationsEnabled,
+              settings.notificationAttentionLevel.allows(kind) else {
+            return .suppressed
+        }
 
-        let notificationSettings = await center.notificationSettings()
-        guard notificationSettings.authorizationStatus == .authorized
-                || notificationSettings.authorizationStatus == .provisional else {
-            return
+        settings.cleanupExpiredProjectMutes()
+        guard !settings.isProjectMuted(task.projectIdentityDirectory) else {
+            return .suppressed
+        }
+        switch await notificationReadiness() {
+        case .available:
+            break
+        case .awaitingAuthorization:
+            return .retryable
+        case .denied:
+            return .suppressed
         }
 
         let content = UNMutableNotificationContent()
         content.title = kind.title
-        content.subtitle = task.title
-        content.body = task.displayStatusText.isEmpty
-            ? task.projectDirectory
+        content.subtitle = task.projectDisplayName
+        let statusText = task.displayStatusText.isEmpty
+            ? kind.title
             : task.displayStatusText
-        content.categoryIdentifier = "GPT_PULSE_TASK"
+        content.body = "\(task.title) · \(statusText)"
+        content.categoryIdentifier = kind.categoryIdentifier
         content.threadIdentifier = task.threadId
         content.userInfo = TaskNotificationRoute(
             taskID: task.id,
             threadID: task.threadId
-        ).userInfo
+        ).userInfo.merging(["notificationKind": kind.rawValue]) { current, _ in current }
         content.sound = settings.notificationSoundEnabled ? .default : nil
 
         let timestamp = Int(task.updatedAt.timeIntervalSince1970 * 1_000)
@@ -127,8 +327,257 @@ final class NotificationService {
             trigger: nil
         )
 
-        try? await center.add(request)
+        return await add(request) ? .delivered : .retryable
     }
+
+    @discardableResult
+    func postCompletionSummary(
+        tasks: [PulseTask]
+    ) async -> NotificationPostOutcome {
+        guard settings.notificationsEnabled,
+              settings.notificationAttentionLevel.allows(.completed) else {
+            return .suppressed
+        }
+
+        settings.cleanupExpiredProjectMutes()
+        let visibleTasks = tasks.filter {
+            !settings.isProjectMuted($0.projectIdentityDirectory)
+        }
+        guard !visibleTasks.isEmpty else { return .suppressed }
+        if visibleTasks.count == 1, let task = visibleTasks.first {
+            return await post(task: task, kind: .completed)
+        }
+        switch await notificationReadiness() {
+        case .available:
+            break
+        case .awaitingAuthorization:
+            return .retryable
+        case .denied:
+            return .suppressed
+        }
+
+        let summary = CompletionNotificationSummary(tasks: visibleTasks)
+
+        let content = UNMutableNotificationContent()
+        content.title = summary.title
+        content.subtitle = summary.subtitle
+        content.body = summary.body
+        content.categoryIdentifier = PulseNotificationCategory.completionSummary
+        content.threadIdentifier = "gpt-pulse.completed"
+        content.userInfo = ["notificationType": "completionSummary"]
+        content.sound = nil
+
+        let request = UNNotificationRequest(
+            identifier: "gpt-pulse.completed-summary.\(Int(Date.now.timeIntervalSince1970 * 1_000))",
+            content: content,
+            trigger: nil
+        )
+        return await add(request) ? .delivered : .retryable
+    }
+
+    @discardableResult
+    func postQuotaAlert(_ alert: RateLimitNotificationAlert) async -> Bool {
+        guard settings.notificationsEnabled else { return false }
+
+        switch await notificationReadiness() {
+        case .available:
+            break
+        case .awaitingAuthorization:
+            return false
+        case .denied:
+            return false
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "\(alert.windowTitle)额度仅剩 \(alert.remainingPercent)%"
+        content.subtitle = "低于 \(alert.threshold)% 提醒阈值"
+        content.body = "将在 \(alert.resetsAt.formatted(date: .abbreviated, time: .shortened)) 重置。"
+        content.categoryIdentifier = PulseNotificationCategory.quota
+        content.threadIdentifier = "gpt-pulse.quota.\(alert.windowMinutes)"
+        content.userInfo = [
+            "notificationType": "quota",
+            "windowMinutes": String(alert.windowMinutes),
+            "resetsAt": String(Int(alert.resetsAt.timeIntervalSince1970)),
+            "threshold": String(alert.threshold),
+            "quotaScope": alert.scopeKey,
+        ]
+        content.sound = settings.notificationSoundEnabled ? .default : nil
+
+        return await add(UNNotificationRequest(
+            identifier: alert.identifier,
+            content: content,
+            trigger: nil
+        ))
+    }
+
+    func reconcilePendingSnoozes(
+        in snapshot: TaskSnapshot,
+        asOf date: Date = .now
+    ) async {
+        let requests = await center.pendingNotificationRequests()
+        let snoozedRequests = requests.filter {
+            $0.identifier.hasPrefix("gpt-pulse.snooze.")
+        }
+        guard !snoozedRequests.isEmpty else { return }
+
+        settings.cleanupExpiredProjectMutes(asOf: date)
+        let identifiersToRemove = snoozedRequests.compactMap { request in
+            SnoozeNotificationPolicy.shouldKeep(
+                userInfo: request.content.userInfo,
+                snapshot: snapshot,
+                settings: settings,
+                asOf: date
+            )
+                ? nil
+                : request.identifier
+        }
+        if !identifiersToRemove.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: identifiersToRemove)
+        }
+    }
+
+    private func notificationReadiness() async -> NotificationReadiness {
+        let notificationSettings = await center.notificationSettings()
+        switch notificationSettings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return .available
+        case .notDetermined:
+            return .awaitingAuthorization
+        case .denied:
+            return .denied
+        @unknown default:
+            return .denied
+        }
+    }
+
+    private func add(_ request: UNNotificationRequest) async -> Bool {
+        do {
+            try await center.add(request)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func registerCategories() {
+        let openTask = UNNotificationAction(
+            identifier: PulseNotificationAction.openTask,
+            title: "在 Codex 中打开",
+            options: [.foreground]
+        )
+        let openPanel = UNNotificationAction(
+            identifier: PulseNotificationAction.openPanel,
+            title: "打开 GPT Pulse",
+            options: [.foreground]
+        )
+        let snooze15 = UNNotificationAction(
+            identifier: PulseNotificationAction.snooze15Minutes,
+            title: "15 分钟后提醒",
+            options: []
+        )
+        let snoozeHour = UNNotificationAction(
+            identifier: PulseNotificationAction.snoozeOneHour,
+            title: "1 小时后提醒",
+            options: []
+        )
+        let markViewed = UNNotificationAction(
+            identifier: PulseNotificationAction.markViewed,
+            title: "标记为已查看",
+            options: []
+        )
+
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: PulseNotificationCategory.actionableTask,
+                actions: [openTask, snooze15, snoozeHour],
+                intentIdentifiers: [],
+                options: []
+            ),
+            UNNotificationCategory(
+                identifier: PulseNotificationCategory.completedTask,
+                actions: [openTask, markViewed],
+                intentIdentifiers: [],
+                options: []
+            ),
+            UNNotificationCategory(
+                identifier: PulseNotificationCategory.terminalTask,
+                actions: [openTask, snooze15, snoozeHour],
+                intentIdentifiers: [],
+                options: []
+            ),
+            UNNotificationCategory(
+                identifier: PulseNotificationCategory.completionSummary,
+                actions: [openPanel],
+                intentIdentifiers: [],
+                options: []
+            ),
+            UNNotificationCategory(
+                identifier: PulseNotificationCategory.quota,
+                actions: [openPanel, snoozeHour],
+                intentIdentifiers: [],
+                options: []
+            ),
+        ])
+    }
+
+    private func handle(_ response: PulseNotificationResponse) async {
+        switch response.actionIdentifier {
+        case UNNotificationDismissActionIdentifier:
+            return
+        case PulseNotificationAction.markViewed:
+            if let route = response.route {
+                await onMarkViewed(route)
+            }
+        case PulseNotificationAction.snooze15Minutes:
+            await reschedule(response, after: 15 * 60)
+        case PulseNotificationAction.snoozeOneHour:
+            await reschedule(response, after: 60 * 60)
+        case PulseNotificationAction.openPanel:
+            onOpenPanel()
+        case PulseNotificationAction.openTask, UNNotificationDefaultActionIdentifier:
+            if let route = response.route {
+                onOpenTask(route)
+            } else {
+                onOpenPanel()
+            }
+        default:
+            break
+        }
+    }
+
+    private func reschedule(
+        _ response: PulseNotificationResponse,
+        after interval: TimeInterval
+    ) async {
+        guard settings.notificationsEnabled else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = response.title
+        content.subtitle = response.subtitle
+        content.body = response.body
+        content.categoryIdentifier = response.categoryIdentifier
+        content.threadIdentifier = response.threadIdentifier
+        content.userInfo = response.userInfo
+        content.sound = settings.notificationSoundEnabled ? .default : nil
+
+        let request = UNNotificationRequest(
+            identifier: "gpt-pulse.snooze.\(UUID().uuidString)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: interval,
+                repeats: false
+            )
+        )
+        _ = await NotificationDeliveryRetrier.deliver {
+            await self.add(request)
+        }
+    }
+}
+
+private enum NotificationReadiness {
+    case available
+    case awaitingAuthorization
+    case denied
 }
 
 @MainActor
@@ -136,11 +585,22 @@ final class TaskNotificationObserver {
     private let monitor: TaskMonitor
     private let notificationService: NotificationService
     private var transitionTracker = TaskNotificationTransitionTracker()
+    private var quotaTracker: RateLimitNotificationTracker
     private var cancellable: AnyCancellable?
+    private var deliveryTasks: [String: Task<Void, Never>] = [:]
+    private var pendingCompletionTasks: [String: PulseTask] = [:]
+    private var completionFlushTask: Task<Void, Never>?
+    private var snoozeReconciliationTracker = SnoozeReconciliationTracker()
+    private var quotaRetryNotBefore = Date.distantPast
 
-    init(monitor: TaskMonitor, notificationService: NotificationService) {
+    init(
+        monitor: TaskMonitor,
+        notificationService: NotificationService,
+        quotaDefaults: UserDefaults = .standard
+    ) {
         self.monitor = monitor
         self.notificationService = notificationService
+        quotaTracker = RateLimitNotificationTracker(defaults: quotaDefaults)
     }
 
     func start() {
@@ -155,17 +615,228 @@ final class TaskNotificationObserver {
     func stop() {
         cancellable = nil
         transitionTracker = TaskNotificationTransitionTracker()
+        quotaTracker.resetPending()
+        snoozeReconciliationTracker = SnoozeReconciliationTracker()
+        completionFlushTask?.cancel()
+        completionFlushTask = nil
+        pendingCompletionTasks.removeAll()
+        deliveryTasks.values.forEach { $0.cancel() }
+        deliveryTasks.removeAll()
     }
 
     private func handle(_ snapshot: TaskSnapshot) {
-        for notification in transitionTracker.notifications(in: snapshot) {
-            Task {
-                await notificationService.post(
-                    task: notification.task,
-                    kind: notification.kind
+        let transitions = transitionTracker.notifications(in: snapshot)
+        let completedTasks = transitions.compactMap { notification in
+            notification.kind == .completed ? notification.task : nil
+        }
+
+        if !completedTasks.isEmpty {
+            enqueueCompletionSummary(completedTasks)
+        }
+
+        for notification in transitions where notification.kind != .completed {
+            enqueueTaskNotification(notification.task, kind: notification.kind)
+        }
+
+        let now = Date.now
+        if snoozeReconciliationTracker.shouldReconcile(snapshot: snapshot, asOf: now) {
+            Task { [weak self] in
+                guard let self else { return }
+                await notificationService.reconcilePendingSnoozes(
+                    in: monitor.snapshot,
+                    asOf: .now
                 )
             }
         }
+
+        guard notificationService.isEnabled, now >= quotaRetryNotBefore else { return }
+        for alert in quotaTracker.pendingAlerts(in: snapshot, asOf: now) {
+            Task { [weak self] in
+                guard let self else { return }
+                let consumed = await notificationService.postQuotaAlert(alert)
+                quotaTracker.resolve(alert, consumed: consumed, asOf: .now)
+                if !consumed {
+                    quotaRetryNotBefore = Date.now.addingTimeInterval(30)
+                }
+            }
+        }
+    }
+
+    private func enqueueTaskNotification(
+        _ task: PulseTask,
+        kind: PulseNotificationKind
+    ) {
+        let key = "\(task.id)|\(kind.rawValue)"
+        guard deliveryTasks[key] == nil else { return }
+
+        deliveryTasks[key] = Task { [weak self] in
+            guard let self else { return }
+            defer { deliveryTasks[key] = nil }
+
+            var retryIndex = 0
+
+            while !Task.isCancelled {
+                let currentSnapshot = monitor.snapshot
+                guard let currentTask = currentSnapshot.tasks.first(where: { $0.id == task.id }) else {
+                    guard TaskNotificationSnapshotReliability.mayBeIncomplete(currentSnapshot) else {
+                        return
+                    }
+                    let delay = NotificationRetryBackoff.delay(afterFailure: retryIndex)
+                    retryIndex += 1
+                    do {
+                        try await Task.sleep(for: delay)
+                    } catch {
+                        return
+                    }
+                    continue
+                }
+                guard PulseNotificationKind(state: currentTask.state) == kind else {
+                    return
+                }
+
+                switch await notificationService.post(task: currentTask, kind: kind) {
+                case .delivered, .suppressed:
+                    return
+                case .retryable:
+                    let delay = NotificationRetryBackoff.delay(afterFailure: retryIndex)
+                    retryIndex += 1
+                    do {
+                        try await Task.sleep(for: delay)
+                    } catch {
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    private func enqueueCompletionSummary(_ tasks: [PulseTask]) {
+        for task in tasks {
+            pendingCompletionTasks[task.id] = task
+        }
+        completionFlushTask?.cancel()
+        completionFlushTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(1))
+            } catch {
+                return
+            }
+            guard let self else { return }
+
+            let queuedTasks = pendingCompletionTasks.values.sorted {
+                $0.updatedAt < $1.updatedAt
+            }
+            pendingCompletionTasks.removeAll()
+            completionFlushTask = nil
+            enqueueCompletionDelivery(queuedTasks)
+        }
+    }
+
+    private func enqueueCompletionDelivery(_ tasks: [PulseTask]) {
+        guard !tasks.isEmpty else { return }
+        let key = "completed|" + tasks.map(\.id).sorted().joined(separator: "|")
+        guard deliveryTasks[key] == nil else { return }
+
+        deliveryTasks[key] = Task { [weak self] in
+            guard let self else { return }
+            defer { deliveryTasks[key] = nil }
+            await deliverCompletionSummaryWithRetry(tasks)
+        }
+    }
+
+    private func deliverCompletionSummaryWithRetry(_ tasks: [PulseTask]) async {
+        var retryIndex = 0
+
+        while !Task.isCancelled {
+            let taskIDs = Set(tasks.map(\.id))
+            let currentSnapshot = monitor.snapshot
+            let currentTasks = currentSnapshot.tasks.filter {
+                taskIDs.contains($0.id) && $0.state == .completed && $0.isUnread
+            }
+            if TaskNotificationSnapshotReliability.mayBeIncomplete(currentSnapshot),
+               currentTasks.count < taskIDs.count {
+                let delay = NotificationRetryBackoff.delay(afterFailure: retryIndex)
+                retryIndex += 1
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return
+                }
+                continue
+            }
+            guard !currentTasks.isEmpty else { return }
+
+            switch await notificationService.postCompletionSummary(tasks: currentTasks) {
+            case .delivered, .suppressed:
+                return
+            case .retryable:
+                let delay = NotificationRetryBackoff.delay(afterFailure: retryIndex)
+                retryIndex += 1
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+}
+
+struct SnoozeReconciliationTracker {
+    private(set) var lastReconciledAt = Date.distantPast
+
+    mutating func shouldReconcile(
+        snapshot: TaskSnapshot,
+        asOf date: Date,
+        minimumInterval: TimeInterval = 30
+    ) -> Bool {
+        guard snapshot.refreshedAt != .distantPast,
+              date.timeIntervalSince(lastReconciledAt) >= minimumInterval else {
+            return false
+        }
+        lastReconciledAt = date
+        return true
+    }
+}
+
+enum NotificationRetryBackoff {
+    private static let delays: [Duration] = [
+        .seconds(2),
+        .seconds(5),
+        .seconds(15),
+        .seconds(30),
+        .seconds(60),
+        .seconds(120),
+        .seconds(300),
+    ]
+
+    static func delay(afterFailure failureIndex: Int) -> Duration {
+        delays[min(max(0, failureIndex), delays.count - 1)]
+    }
+}
+
+@MainActor
+enum NotificationDeliveryRetrier {
+    static let snoozeRetryDelays: [Duration] = [
+        .milliseconds(250),
+        .seconds(1),
+    ]
+
+    static func deliver(
+        delays: [Duration] = snoozeRetryDelays,
+        operation: () async -> Bool
+    ) async -> Bool {
+        if await operation() { return true }
+        for delay in delays {
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return false
+            }
+            if await operation() { return true }
+        }
+        return false
     }
 }
 
@@ -182,8 +853,15 @@ struct TaskNotificationTransitionTracker {
             uniqueKeysWithValues: snapshot.tasks.map { ($0.id, $0.state) }
         )
 
+        var nextStates = currentStates
+        if TaskNotificationSnapshotReliability.mayBeIncomplete(snapshot) {
+            for (taskID, state) in previousStates where nextStates[taskID] == nil {
+                nextStates[taskID] = state
+            }
+        }
+
         defer {
-            previousStates = currentStates
+            previousStates = nextStates
             hasSeededInitialSnapshot = true
         }
 
@@ -199,11 +877,180 @@ struct TaskNotificationTransitionTracker {
     }
 }
 
-private final class NotificationDelegateBridge: NSObject, UNUserNotificationCenterDelegate {
-    private let openTask: @Sendable (TaskNotificationRoute) -> Void
+struct RateLimitNotificationTracker {
+    static let thresholds = [20, 10, 5]
+    static let freshnessInterval: TimeInterval = 15 * 60
+    static let defaultsKey = "quotaNotificationReceiptKeys.v2"
 
-    init(openTask: @escaping @Sendable (TaskNotificationRoute) -> Void) {
-        self.openTask = openTask
+    private var deliveredKeys: Set<String>
+    private var pendingKeys: Set<String> = []
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        deliveredKeys = Set(defaults.stringArray(forKey: Self.defaultsKey) ?? [])
+    }
+
+    mutating func pendingAlerts(
+        in snapshot: TaskSnapshot,
+        asOf date: Date
+    ) -> [RateLimitNotificationAlert] {
+        guard let rateLimits = snapshot.rateLimits else {
+            return []
+        }
+
+        var alerts: [RateLimitNotificationAlert] = []
+        let windows: [(String, RateLimitWindowSnapshot?)] = [
+            ("5h ", rateLimits.fiveHour),
+            ("本周", rateLimits.weekly),
+        ]
+
+        for (title, window) in windows {
+            guard let window,
+                  let remaining = window.remainingPercent(asOf: date) else {
+                continue
+            }
+
+            let observedAt = window.observedAt ?? rateLimits.updatedAt
+            let age = date.timeIntervalSince(observedAt)
+            guard age >= -60, age <= Self.freshnessInterval else { continue }
+
+            let planKey = QuotaNotificationScope.key(for: rateLimits.planType)
+            guard !containsReceipt(
+                in: pendingKeys,
+                window: window,
+                planKey: planKey,
+                threshold: nil
+            ) else {
+                continue
+            }
+
+            let matchingThresholds = Self.thresholds.filter { remaining <= Double($0) }
+            let newThresholds = matchingThresholds.filter {
+                return !containsReceipt(
+                    in: deliveredKeys,
+                    window: window,
+                    planKey: planKey,
+                    threshold: $0
+                ) && !containsReceipt(
+                    in: pendingKeys,
+                    window: window,
+                    planKey: planKey,
+                    threshold: $0
+                )
+            }
+            guard let mostUrgentThreshold = newThresholds.min() else { continue }
+
+            let receiptKeys = Set(matchingThresholds.map {
+                receiptKey(
+                    window: window,
+                    threshold: $0,
+                    planType: rateLimits.planType
+                )
+            })
+            pendingKeys.formUnion(receiptKeys)
+            alerts.append(RateLimitNotificationAlert(
+                windowTitle: title,
+                windowMinutes: window.windowMinutes,
+                remainingPercent: Int(floor(max(0, remaining))),
+                threshold: mostUrgentThreshold,
+                resetsAt: window.resetsAt,
+                scopeKey: planKey,
+                receiptKeys: receiptKeys
+            ))
+        }
+
+        return alerts
+    }
+
+    mutating func resolve(
+        _ alert: RateLimitNotificationAlert,
+        consumed: Bool,
+        asOf date: Date
+    ) {
+        pendingKeys.subtract(alert.receiptKeys)
+        guard consumed else { return }
+        deliveredKeys.formUnion(alert.receiptKeys)
+        pruneAndPersist(asOf: date)
+    }
+
+    mutating func resetPending() {
+        pendingKeys.removeAll()
+    }
+
+    private func receiptKey(
+        window: RateLimitWindowSnapshot,
+        threshold: Int,
+        planType: String?
+    ) -> String {
+        "\(QuotaNotificationScope.key(for: planType))|\(window.windowMinutes)|\(Int(window.resetsAt.timeIntervalSince1970))|\(threshold)"
+    }
+
+    private func containsReceipt(
+        in keys: Set<String>,
+        window: RateLimitWindowSnapshot,
+        planKey: String,
+        threshold: Int?
+    ) -> Bool {
+        keys.contains { key in
+            let components = key.split(separator: "|", omittingEmptySubsequences: false)
+            guard components.count == 4,
+                  String(components[0]) == planKey,
+                  Int(components[1]) == window.windowMinutes,
+                  let resetTimestamp = Int(components[2]),
+                  threshold.map({ Int(components[3]) == $0 }) ?? true
+            else {
+                return false
+            }
+            return RateLimitResetSemantics.representsSameWindow(
+                Date(timeIntervalSince1970: TimeInterval(resetTimestamp)),
+                window.resetsAt
+            )
+        }
+    }
+
+    private mutating func pruneAndPersist(asOf date: Date) {
+        let minimumResetTimestamp = Int(date.addingTimeInterval(-24 * 60 * 60).timeIntervalSince1970)
+        deliveredKeys = Set(deliveredKeys.filter { key in
+            let components = key.split(separator: "|")
+            guard components.count == 4,
+                  let resetTimestamp = Int(components[2]) else {
+                return false
+            }
+            return resetTimestamp >= minimumResetTimestamp
+        })
+        defaults.set(deliveredKeys.sorted(), forKey: Self.defaultsKey)
+    }
+}
+
+struct PulseNotificationResponse: Sendable {
+    let actionIdentifier: String
+    let route: TaskNotificationRoute?
+    let title: String
+    let subtitle: String
+    let body: String
+    let categoryIdentifier: String
+    let threadIdentifier: String
+    let userInfo: [String: String]
+}
+
+final class NotificationDelegateBridge: NSObject, UNUserNotificationCenterDelegate {
+    var onResponse: (@Sendable (PulseNotificationResponse) async -> Void)?
+
+    func dispatch(
+        _ response: PulseNotificationResponse,
+        completionHandler: @escaping () -> Void
+    ) {
+        guard let onResponse else {
+            completionHandler()
+            return
+        }
+
+        let completion = NotificationResponseCompletion(completionHandler)
+        Task {
+            await onResponse(response)
+            completion.call()
+        }
     }
 
     func userNotificationCenter(
@@ -219,14 +1066,40 @@ private final class NotificationDelegateBridge: NSObject, UNUserNotificationCent
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        defer { completionHandler() }
-
-        guard let route = TaskNotificationRoute(
-            userInfo: response.notification.request.content.userInfo
-        ) else {
-            return
+        let content = response.notification.request.content
+        let userInfo = content.userInfo.reduce(into: [String: String]()) { result, item in
+            guard let key = item.key as? String,
+                  let value = item.value as? String else {
+                return
+            }
+            result[key] = value
         }
+        dispatch(PulseNotificationResponse(
+            actionIdentifier: response.actionIdentifier,
+            route: TaskNotificationRoute(userInfo: content.userInfo),
+            title: content.title,
+            subtitle: content.subtitle,
+            body: content.body,
+            categoryIdentifier: content.categoryIdentifier,
+            threadIdentifier: content.threadIdentifier,
+            userInfo: userInfo
+        ), completionHandler: completionHandler)
+    }
+}
 
-        openTask(route)
+private final class NotificationResponseCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: (() -> Void)?
+
+    init(_ handler: @escaping () -> Void) {
+        self.handler = handler
+    }
+
+    func call() {
+        lock.lock()
+        let handler = handler
+        self.handler = nil
+        lock.unlock()
+        handler?()
     }
 }

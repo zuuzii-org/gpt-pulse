@@ -2,7 +2,11 @@ import Foundation
 
 extension PulseTask {
     var projectDisplayName: String {
-        ProjectDisplayNameResolver.resolve(projectDirectory)
+        ProjectDirectoryIdentityResolver.resolve(projectDirectory)
+    }
+
+    var projectIdentityDirectory: String {
+        ProjectDirectoryIdentityResolver.identityDirectory(projectDirectory)
     }
 
     var displayStatusText: String {
@@ -94,21 +98,68 @@ extension Date {
     }
 }
 
-private enum ProjectDisplayNameResolver {
+enum ProjectDirectoryIdentityResolver {
+    private final class CachedResolution: NSObject {
+        let identityDirectory: String
+        let displayName: String
+
+        init(identityDirectory: String, displayName: String) {
+            self.identityDirectory = identityDirectory
+            self.displayName = displayName
+        }
+    }
+
+    // SwiftUI can ask for a task's presentation several times per render pass.
+    // Cache the filesystem-backed Git-root lookup by cwd so row rendering stays
+    // a cheap in-memory operation after the first resolution.
+    // NSCache is documented as safe for concurrent access. Swift does not
+    // currently model that guarantee with Sendable, so keep the escape hatch
+    // narrowly scoped to this immutable cache reference.
+    nonisolated(unsafe) private static let cache = NSCache<NSString, CachedResolution>()
+
     static func resolve(_ projectDirectory: String) -> String {
-        guard !projectDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "未识别项目"
+        resolution(for: projectDirectory).displayName
+    }
+
+    static func identityDirectory(_ projectDirectory: String) -> String {
+        resolution(for: projectDirectory).identityDirectory
+    }
+
+    private static func resolution(for projectDirectory: String) -> CachedResolution {
+        let cacheKey = projectDirectory as NSString
+        if let cached = cache.object(forKey: cacheKey) {
+            return cached
         }
 
-        var candidate = URL(fileURLWithPath: projectDirectory).standardizedFileURL
-        guard candidate.path != "/" else { return "未识别项目" }
-        let fallbackName = candidate.lastPathComponent
+        let identity = resolveIdentityDirectory(projectDirectory)
+        let lastPathComponent = identity.isEmpty
+            ? ""
+            : URL(fileURLWithPath: identity).lastPathComponent
+        let displayName = lastPathComponent.isEmpty ? "未识别项目" : lastPathComponent
+        let result = CachedResolution(
+            identityDirectory: identity,
+            displayName: displayName
+        )
+        cache.setObject(result, forKey: cacheKey)
+        return result
+    }
+
+    private static func resolveIdentityDirectory(_ projectDirectory: String) -> String {
+        guard !projectDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ""
+        }
+
+        let standardized = URL(fileURLWithPath: projectDirectory)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        var candidate = standardized
+        guard candidate.path != "/" else { return "" }
 
         while true {
             let gitMarker = candidate.appendingPathComponent(".git", isDirectory: false)
             if FileManager.default.fileExists(atPath: gitMarker.path),
                !candidate.lastPathComponent.isEmpty {
-                return candidate.lastPathComponent
+                return candidate.path
             }
 
             let parent = candidate.deletingLastPathComponent()
@@ -116,7 +167,7 @@ private enum ProjectDisplayNameResolver {
             candidate = parent
         }
 
-        return fallbackName.isEmpty ? "未识别项目" : fallbackName
+        return standardized.path
     }
 }
 

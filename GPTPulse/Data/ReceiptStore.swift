@@ -36,25 +36,74 @@ actor ReceiptStore {
     }
 
     func markViewed(_ task: PulseTask, at date: Date = .now) throws {
+        try markViewed([task], at: date)
+    }
+
+    func markViewed(_ tasks: [PulseTask], at date: Date = .now) throws {
+        let tasks = uniqueTasks(tasks)
+        guard !tasks.isEmpty else { return }
         let currentSnapshot = try snapshot(now: date)
         do {
             let connection = try openConnection()
             try ensureSchema(in: connection)
-            try connection.execute(
-                """
-                INSERT INTO receipts(task_id, thread_id, turn_id, viewed_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(task_id) DO UPDATE SET viewed_at = excluded.viewed_at
-                """,
-                bindings: [
-                    .text(task.id),
-                    .text(task.threadId),
-                    task.turnId.map(SQLiteValue.text) ?? .null,
-                    .double(date.timeIntervalSince1970),
-                ]
-            )
+            try transaction(in: connection) {
+                for task in tasks {
+                    try connection.execute(
+                        """
+                        INSERT INTO receipts(task_id, thread_id, turn_id, viewed_at)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT(task_id) DO UPDATE SET
+                            thread_id = excluded.thread_id,
+                            turn_id = excluded.turn_id,
+                            viewed_at = excluded.viewed_at
+                        """,
+                        bindings: [
+                            .text(task.id),
+                            .text(task.threadId),
+                            task.turnId.map(SQLiteValue.text) ?? .null,
+                            .double(date.timeIntervalSince1970),
+                        ]
+                    )
+                }
+            }
             var viewedTaskIDs = currentSnapshot.viewedTaskIDs
-            viewedTaskIDs.insert(task.id)
+            viewedTaskIDs.formUnion(tasks.map(\.id))
+            cachedSnapshot = ReceiptSnapshot(
+                baselineAt: currentSnapshot.baselineAt,
+                viewedTaskIDs: viewedTaskIDs
+            )
+        } catch {
+            cachedSnapshot = nil
+            throw error
+        }
+    }
+
+    func unmarkViewed(_ task: PulseTask) throws {
+        try unmarkViewed([task])
+    }
+
+    func unmarkViewed(_ tasks: [PulseTask]) throws {
+        let tasks = uniqueTasks(tasks)
+        guard !tasks.isEmpty else { return }
+        let currentSnapshot = try snapshot()
+        do {
+            let connection = try openConnection()
+            try ensureSchema(in: connection)
+            try transaction(in: connection) {
+                for task in tasks {
+                    try connection.execute(
+                        """
+                        DELETE FROM receipts
+                        WHERE task_id = ?
+                        """,
+                        bindings: [
+                            .text(task.id),
+                        ]
+                    )
+                }
+            }
+            var viewedTaskIDs = currentSnapshot.viewedTaskIDs
+            viewedTaskIDs.subtract(tasks.map(\.id))
             cachedSnapshot = ReceiptSnapshot(
                 baselineAt: currentSnapshot.baselineAt,
                 viewedTaskIDs: viewedTaskIDs
@@ -108,6 +157,25 @@ actor ReceiptStore {
         try connection.execute(
             "CREATE INDEX IF NOT EXISTS receipts_thread_id ON receipts(thread_id)"
         )
+    }
+
+    private func transaction(
+        in connection: SQLiteConnection,
+        _ body: () throws -> Void
+    ) throws {
+        try connection.execute("BEGIN IMMEDIATE TRANSACTION")
+        do {
+            try body()
+            try connection.execute("COMMIT")
+        } catch {
+            try? connection.execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    private func uniqueTasks(_ tasks: [PulseTask]) -> [PulseTask] {
+        var taskIDs: Set<String> = []
+        return tasks.filter { taskIDs.insert($0.id).inserted }
     }
 
     private func readOrCreateBaseline(

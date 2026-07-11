@@ -27,14 +27,24 @@ final class AppCoordinator {
 
         let sidebar = TaskSidebarView(
             monitor: monitor,
+            settings: settings,
             onOpenTask: { [weak self] task in self?.openTask(task) ?? false },
             onMarkViewed: { [weak monitor] task in monitor?.markViewed(task: task) },
+            onMarkAllViewed: { [weak monitor] tasks in
+                guard let monitor else { return false }
+                return await monitor.markViewedAndRefresh(tasks: tasks)
+            },
+            onUndoMarkViewed: { [weak monitor] tasks in
+                guard let monitor else { return false }
+                return await monitor.unmarkViewedAndRefresh(tasks: tasks)
+            },
             onDismiss: { [weak self] in self?.panelController.hide() },
             onOpenSettings: { [weak self] in self?.openSettings() }
         )
         panelController = TaskPanelController(
             width: settings.panelWidth,
             dismissDelay: settings.panelDismissDelay,
+            statusItemDisplayDuration: settings.statusItemPanelDisplayDuration,
             rootView: sidebar
         )
 
@@ -43,9 +53,18 @@ final class AppCoordinator {
             markViewed: { [weak monitor] task in monitor?.markViewed(task: task) },
             dismiss: { [weak self] in self?.panelController.hide() }
         )
-        notificationService = NotificationService(settings: settings) { [weak self] route in
-            self?.openNotification(route)
-        }
+        notificationService = NotificationService(
+            settings: settings,
+            onOpenTask: { [weak self] route in
+                self?.openNotification(route)
+            },
+            onMarkViewed: { [weak self] route in
+                await self?.markNotificationViewed(route)
+            },
+            onOpenPanel: { [weak self] in
+                self?.showPanel()
+            }
+        )
         settingsWindowController = SettingsWindowController(
             settings: settings,
             launchAtLogin: launchAtLogin,
@@ -56,6 +75,7 @@ final class AppCoordinator {
 
         statusItemController = StatusItemController(monitor: monitor)
         statusItemController.onTogglePanel = { [weak self] in self?.togglePanel() }
+        statusItemController.onOpenAttentionTask = { [weak self] in self?.openAttentionTask() }
         statusItemController.onRefresh = { [weak monitor] in monitor?.refresh() }
         statusItemController.onOpenSettings = { [weak self] in self?.openSettings() }
         statusItemController.onQuit = { NSApp.terminate(nil) }
@@ -66,7 +86,7 @@ final class AppCoordinator {
             self?.panelController.isVisible ?? false
         }
         edgeTriggerService.onTrigger = { [weak self] screen in
-            self?.panelController.show(on: screen)
+            self?.panelController.show(on: screen, source: .edgeHover)
         }
         edgeTriggerService.onPointerMove = { [weak self] location in
             self?.panelController.handlePointerMove(to: location)
@@ -87,7 +107,7 @@ final class AppCoordinator {
         if isPanelUITest {
             panelController.preventsAutomaticDismiss = true
             if let screen = NSScreen.main {
-                panelController.show(on: screen)
+                panelController.show(on: screen, source: .programmatic)
             }
         } else {
             edgeTriggerService.start()
@@ -116,15 +136,65 @@ final class AppCoordinator {
         let location = NSEvent.mouseLocation
         let screen = NSScreen.containing(location) ?? NSScreen.main
         guard let screen else { return }
-        panelController.toggle(on: screen)
+        panelController.toggleFromStatusItem(on: screen)
+    }
+
+    private func showPanel() {
+        let location = NSEvent.mouseLocation
+        let screen = NSScreen.containing(location) ?? NSScreen.main
+        guard let screen else { return }
+        panelController.show(on: screen, source: .programmatic)
     }
 
     private func openTask(_ task: PulseTask) -> Bool {
         taskOpeningService.open(task: task)
     }
 
+    private func openAttentionTask() {
+        let task = AttentionTaskSelector.next(in: monitor.snapshot.tasks)
+        guard let task else {
+            showPanel()
+            return
+        }
+
+        if !openTask(task) {
+            showPanel()
+        }
+    }
+
     private func openNotification(_ route: TaskNotificationRoute) {
-        taskOpeningService.open(route: route, currentTasks: monitor.snapshot.tasks)
+        if !taskOpeningService.open(route: route, currentTasks: monitor.snapshot.tasks) {
+            showPanel()
+        }
+    }
+
+    private func markNotificationViewed(_ route: TaskNotificationRoute) async {
+        if let task = monitor.snapshot.tasks.first(where: { $0.id == route.taskID }) {
+            _ = await monitor.markViewedAndRefresh(tasks: [task])
+            return
+        }
+
+        let identityPrefix = route.threadID + ":"
+        let suffix = route.taskID.hasPrefix(identityPrefix)
+            ? String(route.taskID.dropFirst(identityPrefix.count))
+            : "thread"
+        let task = PulseTask(
+            threadId: route.threadID,
+            turnId: suffix == "thread" ? nil : suffix,
+            title: "通知中的已完成任务",
+            projectDirectory: "",
+            state: .completed,
+            startedAt: .now,
+            updatedAt: .now,
+            completedAt: .now,
+            lastStatus: "completed",
+            isUnread: true
+        )
+        guard task.id == route.taskID else {
+            showPanel()
+            return
+        }
+        _ = await monitor.markViewedAndRefresh(tasks: [task])
     }
 
     private func openSettings() {

@@ -26,6 +26,27 @@ struct RateLimitWindowSnapshot: Codable, Equatable, Sendable {
     let usedPercent: Double
     let windowMinutes: Int
     let resetsAt: Date
+    let observedAt: Date?
+
+    init(
+        usedPercent: Double,
+        windowMinutes: Int,
+        resetsAt: Date,
+        observedAt: Date? = nil
+    ) {
+        self.usedPercent = usedPercent
+        self.windowMinutes = windowMinutes
+        self.resetsAt = resetsAt
+        self.observedAt = observedAt
+    }
+}
+
+enum RateLimitResetSemantics {
+    static let tolerance: TimeInterval = 60
+
+    static func representsSameWindow(_ lhs: Date, _ rhs: Date) -> Bool {
+        abs(lhs.timeIntervalSince(rhs)) <= tolerance
+    }
 }
 
 struct RateLimitSnapshot: Codable, Equatable, Sendable {
@@ -33,16 +54,22 @@ struct RateLimitSnapshot: Codable, Equatable, Sendable {
     let weekly: RateLimitWindowSnapshot?
     let updatedAt: Date
     let planType: String?
+    let limitID: String?
+    let conflictingResetHistoryUntil: Date?
 
     init(
         fiveHour: RateLimitWindowSnapshot?,
         weekly: RateLimitWindowSnapshot?,
         updatedAt: Date,
-        planType: String? = nil
+        planType: String? = nil,
+        limitID: String? = nil,
+        conflictingResetHistoryUntil: Date? = nil
     ) {
         self.fiveHour = fiveHour
         self.weekly = weekly
         self.updatedAt = updatedAt
         self.planType = planType
+        self.limitID = limitID
+        self.conflictingResetHistoryUntil = conflictingResetHistoryUntil
     }
 }

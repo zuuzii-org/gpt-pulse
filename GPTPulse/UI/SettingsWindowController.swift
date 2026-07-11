@@ -19,8 +19,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let window = NSWindow(contentViewController: hostingController)
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.title = "GPT Pulse 设置"
-        window.setContentSize(NSSize(width: 580, height: 470))
-        window.contentMinSize = NSSize(width: 540, height: 430)
+        window.setContentSize(NSSize(width: 580, height: 540))
+        window.contentMinSize = NSSize(width: 540, height: 500)
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
         window.setFrameAutosaveName("GPTPulse.SettingsWindow")

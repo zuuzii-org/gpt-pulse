@@ -1,11 +1,16 @@
+import AppKit
+import Combine
 import ServiceManagement
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @ObservedObject var settings: PulseSettings
     @ObservedObject var launchAtLogin: LaunchAtLoginService
 
     let requestNotificationAuthorization: @MainActor () async -> Void
+
+    @State private var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
 
     var body: some View {
         Form {
@@ -22,10 +27,49 @@ struct SettingsView: View {
                 Toggle("任务状态通知", isOn: $settings.notificationsEnabled)
                     .onChange(of: settings.notificationsEnabled) { _, enabled in
                         guard enabled else { return }
-                        Task { await requestNotificationAuthorization() }
+                        Task {
+                            await requestNotificationAuthorization()
+                            await refreshNotificationAuthorizationStatus()
+                        }
                     }
+
+                if settings.notificationsEnabled,
+                   notificationAuthorizationStatus == .denied {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label("系统通知权限已关闭，当前不会收到提醒。", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button("打开系统通知设置") {
+                            openSystemNotificationSettings()
+                        }
+                    }
+                }
+
+                Picker("提醒范围", selection: $settings.notificationAttentionLevel) {
+                    ForEach(NotificationAttentionLevel.allCases) { level in
+                        Text(level.title).tag(level)
+                    }
+                }
+                .disabled(!settings.notificationsEnabled)
+
+                Text(settings.notificationAttentionLevel.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Toggle("播放通知声音", isOn: $settings.notificationSoundEnabled)
                     .disabled(!settings.notificationsEnabled)
+
+                if !settings.mutedProjectExpirations.isEmpty {
+                    HStack {
+                        LabeledContent(
+                            "临时静音项目",
+                            value: "\(settings.mutedProjectExpirations.count) 个"
+                        )
+                        Button("全部取消静音") {
+                            settings.clearProjectMutes()
+                        }
+                    }
+                }
             }
 
             Section("系统") {
@@ -56,10 +100,16 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 540, idealWidth: 580, minHeight: 430, idealHeight: 470)
+        .frame(minWidth: 540, idealWidth: 580, minHeight: 500, idealHeight: 540)
         .navigationTitle("GPT Pulse 设置")
         .onAppear {
             launchAtLogin.refresh()
+        }
+        .task {
+            await refreshNotificationAuthorizationStatus()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await refreshNotificationAuthorizationStatus() }
         }
     }
 
@@ -70,5 +120,19 @@ struct SettingsView: View {
                 Task { await launchAtLogin.setEnabled(enabled) }
             }
         )
+    }
+
+    private func refreshNotificationAuthorizationStatus() async {
+        let notificationSettings = await UNUserNotificationCenter.current().notificationSettings()
+        notificationAuthorizationStatus = notificationSettings.authorizationStatus
+    }
+
+    private func openSystemNotificationSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+        ) else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 }

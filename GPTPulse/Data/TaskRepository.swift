@@ -3,6 +3,9 @@ import Foundation
 protocol TaskRepositoryProtocol: Sendable {
     func snapshot(now: Date) async -> TaskSnapshot
     func markViewed(_ task: PulseTask, at date: Date) async throws
+    func markViewed(_ tasks: [PulseTask], at date: Date) async throws
+    func unmarkViewed(_ task: PulseTask) async throws
+    func unmarkViewed(_ tasks: [PulseTask]) async throws
 }
 
 actor TaskRepository: TaskRepositoryProtocol {
@@ -19,6 +22,8 @@ actor TaskRepository: TaskRepositoryProtocol {
     private let rolloutAdapter: CodexRolloutAdapter
     private let journalReader: PluginEventJournalReader
     private let receiptStore: ReceiptStore
+    private let accountRateLimitObserver: (any CodexAccountRateLimitObserving)?
+    private let agentActivityObserver: (any CodexAgentActivityObserving)?
     private let sqliteRefreshInterval: TimeInterval
     private let runningStaleInterval: TimeInterval
     private let terminalRetentionInterval: TimeInterval
@@ -32,6 +37,8 @@ actor TaskRepository: TaskRepositoryProtocol {
         rolloutAdapter: CodexRolloutAdapter,
         journalReader: PluginEventJournalReader,
         receiptStore: ReceiptStore,
+        accountRateLimitObserver: (any CodexAccountRateLimitObserving)? = nil,
+        agentActivityObserver: (any CodexAgentActivityObserving)? = nil,
         sqliteRefreshInterval: TimeInterval = 30,
         runningStaleInterval: TimeInterval = 24 * 60 * 60,
         terminalRetentionInterval: TimeInterval = 24 * 60 * 60,
@@ -42,6 +49,8 @@ actor TaskRepository: TaskRepositoryProtocol {
         self.rolloutAdapter = rolloutAdapter
         self.journalReader = journalReader
         self.receiptStore = receiptStore
+        self.accountRateLimitObserver = accountRateLimitObserver
+        self.agentActivityObserver = agentActivityObserver
         self.sqliteRefreshInterval = sqliteRefreshInterval
         self.runningStaleInterval = runningStaleInterval
         self.terminalRetentionInterval = terminalRetentionInterval
@@ -63,12 +72,23 @@ actor TaskRepository: TaskRepositoryProtocol {
             journalReader: PluginEventJournalReader(
                 journalURL: paths.pluginJournalURL
             ),
-            receiptStore: ReceiptStore(databaseURL: paths.receiptsDatabaseURL)
+            receiptStore: ReceiptStore(databaseURL: paths.receiptsDatabaseURL),
+            accountRateLimitObserver: CodexAccountRateLimitObserver(
+                loader: CodexAppServerRateLimitClient()
+            ),
+            agentActivityObserver: CodexAgentActivityObserver(codexHome: paths.codexHome)
         )
     }
 
     func snapshot(now: Date = .now) async -> TaskSnapshot {
-        var health: [AdapterHealth] = [appServerProbe.health(now: now)]
+        let accountRateLimitObservation: CodexAccountRateLimitObservation? = if let accountRateLimitObserver {
+            await accountRateLimitObserver.observation(now: now)
+        } else {
+            nil
+        }
+        var health: [AdapterHealth] = [
+            accountRateLimitObservation?.health ?? appServerProbe.health(now: now),
+        ]
 
         let receipts: ReceiptSnapshot
         do {
@@ -211,10 +231,17 @@ actor TaskRepository: TaskRepositoryProtocol {
             }
         }
 
-        let rateLimits = consolidatedRateLimits(
+        let rolloutRateLimits = RolloutRateLimitSelector.select(
             rolloutResult.records.compactMap(\.status.rateLimits),
             now: now
         )
+        let rateLimits: RateLimitSnapshot?
+        if let accountRateLimitObservation {
+            rateLimits = accountRateLimitObservation.snapshot
+                ?? (accountRateLimitObservation.fallbackAllowed ? rolloutRateLimits : nil)
+        } else {
+            rateLimits = rolloutRateLimits
+        }
 
         let verifiedThreadIDs = Set(metadataByThread.keys)
         for record in journalResult.records where verifiedThreadIDs.contains(record.threadId) {
@@ -231,15 +258,47 @@ actor TaskRepository: TaskRepositoryProtocol {
             )
         }
 
+        let agentActivityByThread: [String: AgentActivityObservation]
+        if let agentActivityObserver {
+            let observableRootStates = statusByThread.compactMapValues { status -> PulseTaskState? in
+                guard metadataByThread[status.threadId] != nil,
+                      !status.isStaleRunning(at: now, cutoff: runningStaleInterval)
+                else {
+                    return nil
+                }
+                return status.state
+            }
+            let observed = await agentActivityObserver.observations(
+                rootStates: observableRootStates,
+                now: now
+            )
+            agentActivityByThread = Dictionary(uniqueKeysWithValues: observableRootStates.keys.map {
+                threadId in
+                (
+                    threadId,
+                    observed[threadId] ?? AgentActivityObservation(
+                        activeCount: nil,
+                        confidence: .unavailable,
+                        observedAt: now
+                    )
+                )
+            })
+        } else {
+            agentActivityByThread = [:]
+        }
+
         var tasks: [PulseTask] = []
         for (threadId, status) in statusByThread {
             guard let metadata = metadataByThread[threadId] else { continue }
             if status.isStaleRunning(at: now, cutoff: runningStaleInterval) {
                 continue
             }
+            let agentActivity = agentActivityByThread[threadId]
+            let hasActiveAgents = (agentActivity?.activeCount ?? 0) > 0
             let completionDate = status.completedAt ?? status.updatedAt
             if status.state.isTerminal,
-               now.timeIntervalSince(completionDate) > terminalRetentionInterval
+               now.timeIntervalSince(completionDate) > terminalRetentionInterval,
+               !hasActiveAgents
             {
                 continue
             }
@@ -266,13 +325,23 @@ actor TaskRepository: TaskRepositoryProtocol {
                 lastStatus: status.lastStatus,
                 isUnread: isUnread,
                 tokenUsage: rolloutTokenUsageByThread[threadId]
-                    ?? sqliteTokenUsageByThread[threadId]
+                    ?? sqliteTokenUsageByThread[threadId],
+                agentActivity: agentActivity
             ))
         }
 
+        let protectedTerminalIDs = Set(
+            tasks.lazy
+                .filter {
+                    $0.state.isTerminal && ($0.agentActivity?.activeCount ?? 0) > 0
+                }
+                .map(\.id)
+        )
         let retainedTerminalIDs = Set(
             tasks.lazy
-                .filter { $0.state.isTerminal }
+                .filter {
+                    $0.state.isTerminal && !protectedTerminalIDs.contains($0.id)
+                }
                 .sorted { lhs, rhs in
                     if lhs.isUnread != rhs.isUnread { return lhs.isUnread }
                     let leftDate = lhs.completedAt ?? lhs.updatedAt
@@ -282,7 +351,7 @@ actor TaskRepository: TaskRepositoryProtocol {
                 }
                 .prefix(max(0, terminalLimit))
                 .map(\.id)
-        )
+        ).union(protectedTerminalIDs)
         tasks.removeAll { task in
             task.state.isTerminal && !retainedTerminalIDs.contains(task.id)
         }
@@ -305,6 +374,18 @@ actor TaskRepository: TaskRepositoryProtocol {
 
     func markViewed(_ task: PulseTask, at date: Date = .now) async throws {
         try await receiptStore.markViewed(task, at: date)
+    }
+
+    func markViewed(_ tasks: [PulseTask], at date: Date = .now) async throws {
+        try await receiptStore.markViewed(tasks, at: date)
+    }
+
+    func unmarkViewed(_ task: PulseTask) async throws {
+        try await receiptStore.unmarkViewed(task)
+    }
+
+    func unmarkViewed(_ tasks: [PulseTask]) async throws {
+        try await receiptStore.unmarkViewed(tasks)
     }
 
     private func mergedStatus(
@@ -347,56 +428,6 @@ actor TaskRepository: TaskRepositoryProtocol {
 
     private func groupPriority(_ group: PulseTaskGroup) -> Int {
         PulseTaskGroup.displayOrder.firstIndex(of: group) ?? Int.max
-    }
-
-    private func consolidatedRateLimits(
-        _ snapshots: [RateLimitSnapshot],
-        now: Date
-    ) -> RateLimitSnapshot? {
-        let fiveHour = mostRestrictiveWindow(
-            in: snapshots,
-            at: \RateLimitSnapshot.fiveHour,
-            now: now
-        )
-        let weekly = mostRestrictiveWindow(
-            in: snapshots,
-            at: \RateLimitSnapshot.weekly,
-            now: now
-        )
-        guard fiveHour != nil || weekly != nil else { return nil }
-
-        let selectedSnapshots = [fiveHour?.snapshot, weekly?.snapshot].compactMap { $0 }
-        let oldestSelectedUpdate = selectedSnapshots.map(\.updatedAt).min() ?? now
-        let planType = selectedSnapshots
-            .sorted { $0.updatedAt > $1.updatedAt }
-            .compactMap(\.planType)
-            .first
-
-        return RateLimitSnapshot(
-            fiveHour: fiveHour?.window,
-            weekly: weekly?.window,
-            updatedAt: oldestSelectedUpdate,
-            planType: planType
-        )
-    }
-
-    private func mostRestrictiveWindow(
-        in snapshots: [RateLimitSnapshot],
-        at keyPath: KeyPath<RateLimitSnapshot, RateLimitWindowSnapshot?>,
-        now: Date
-    ) -> (snapshot: RateLimitSnapshot, window: RateLimitWindowSnapshot)? {
-        snapshots.compactMap { snapshot in
-            guard let window = snapshot[keyPath: keyPath], window.resetsAt > now else {
-                return nil
-            }
-            return (snapshot, window)
-        }
-        .max { lhs, rhs in
-            if lhs.window.usedPercent != rhs.window.usedPercent {
-                return lhs.window.usedPercent < rhs.window.usedPercent
-            }
-            return lhs.snapshot.updatedAt < rhs.snapshot.updatedAt
-        }
     }
 
     private func replaceHealth(

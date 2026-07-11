@@ -47,6 +47,7 @@ targets:
           VALIDATE_PRODUCT: YES
     dependencies:
       - sdk: libsqlite3.tbd
+      - sdk: Security.framework
     scheme:
       testTargets:
         - GPTPulseTests

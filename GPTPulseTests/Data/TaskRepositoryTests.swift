@@ -59,7 +59,7 @@ final class TaskRepositoryTests: XCTestCase {
         XCTAssertEqual(snapshot.tasks.first?.isUnread, false)
     }
 
-    func testRolloutBreakdownWinsSQLiteFallbackAndRateLimitUsesLowestCurrentBalance() async throws {
+    func testRolloutBreakdownWinsSQLiteFallbackAndRateLimitUsesLatestAtomicSnapshot() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -70,6 +70,7 @@ final class TaskRepositoryTests: XCTestCase {
         let breakdownURL = sessions.appendingPathComponent("breakdown.jsonl")
         let fallbackURL = sessions.appendingPathComponent("fallback.jsonl")
         let alternatePoolURL = sessions.appendingPathComponent("alternate-pool.jsonl")
+        let staleHighWaterURL = sessions.appendingPathComponent("stale-high-water.jsonl")
         try writeRollout(
             to: breakdownURL,
             threadId: "breakdown",
@@ -99,6 +100,16 @@ final class TaskRepositoryTests: XCTestCase {
             tokenUsage: nil,
             rateUsed: 0,
             telemetryAt: now.addingTimeInterval(-8)
+        )
+        try writeRollout(
+            to: staleHighWaterURL,
+            threadId: "stale-high-water",
+            turnId: "turn-stale-high-water",
+            startedAt: now.addingTimeInterval(-25 * 60),
+            completedAt: now.addingTimeInterval(-20 * 60),
+            tokenUsage: nil,
+            rateUsed: 95,
+            telemetryAt: now.addingTimeInterval(-20 * 60)
         )
 
         let databaseURL = root.appendingPathComponent("state_5.sqlite")
@@ -132,9 +143,95 @@ final class TaskRepositoryTests: XCTestCase {
         )
         let fallback = try XCTUnwrap(snapshot.tasks.first { $0.threadId == "fallback" })
         XCTAssertEqual(fallback.tokenUsage, TokenUsageSnapshot(totalTokens: 777))
-        XCTAssertEqual(snapshot.rateLimits?.updatedAt, now.addingTimeInterval(-15))
-        XCTAssertEqual(snapshot.rateLimits?.fiveHour?.usedPercent, 27)
-        XCTAssertEqual(snapshot.rateLimits?.weekly?.usedPercent, 54)
+        XCTAssertEqual(snapshot.rateLimits?.updatedAt, now.addingTimeInterval(-8))
+        XCTAssertEqual(snapshot.rateLimits?.fiveHour?.usedPercent, 0)
+        XCTAssertEqual(snapshot.rateLimits?.weekly?.usedPercent, 0)
+    }
+
+    func testAccountRateLimitsOverrideRolloutTelemetryAsOneGroup() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+
+        let now = Date(timeIntervalSince1970: 1_783_751_200)
+        try writeRollout(
+            to: sessions.appendingPathComponent("wrong-rollout-group.jsonl"),
+            threadId: "wrong-rollout-group",
+            turnId: "turn-wrong-rollout-group",
+            startedAt: now.addingTimeInterval(-60),
+            completedAt: now.addingTimeInterval(-5),
+            rateUsed: 40,
+            telemetryAt: now.addingTimeInterval(-10)
+        )
+
+        let official = RateLimitSnapshot(
+            fiveHour: RateLimitWindowSnapshot(
+                usedPercent: 2,
+                windowMinutes: 300,
+                resetsAt: Date(timeIntervalSince1970: 1_783_767_714),
+                observedAt: now
+            ),
+            weekly: RateLimitWindowSnapshot(
+                usedPercent: 0,
+                windowMinutes: 10_080,
+                resetsAt: Date(timeIntervalSince1970: 1_784_354_514),
+                observedAt: now
+            ),
+            updatedAt: now,
+            planType: "pro",
+            limitID: "codex"
+        )
+        let receipts = ReceiptStore(databaseURL: root.appendingPathComponent("receipts.sqlite"))
+        _ = try await receipts.snapshot(now: now.addingTimeInterval(-120))
+        let repository = makeRepository(
+            root: root,
+            sessions: sessions,
+            sqliteCandidates: [],
+            receiptStore: receipts,
+            accountRateLimitObserver: StaticRateLimitObserver(snapshot: official)
+        )
+
+        let snapshot = await repository.snapshot(now: now)
+
+        XCTAssertEqual(snapshot.rateLimits, official)
+        XCTAssertEqual(
+            snapshot.health.first { $0.adapter == .appServer },
+            .healthy(.appServer, at: now)
+        )
+    }
+
+    func testInitialAccountLimitConnectionDoesNotExposeRolloutFallback() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+
+        let now = Date(timeIntervalSince1970: 1_783_751_200)
+        try writeRollout(
+            to: sessions.appendingPathComponent("rollout-fallback.jsonl"),
+            threadId: "rollout-fallback",
+            turnId: "turn-rollout-fallback",
+            startedAt: now.addingTimeInterval(-60),
+            completedAt: now.addingTimeInterval(-5),
+            rateUsed: 40,
+            telemetryAt: now.addingTimeInterval(-10)
+        )
+        let receipts = ReceiptStore(databaseURL: root.appendingPathComponent("receipts.sqlite"))
+        _ = try await receipts.snapshot(now: now.addingTimeInterval(-120))
+        let repository = makeRepository(
+            root: root,
+            sessions: sessions,
+            sqliteCandidates: [],
+            receiptStore: receipts,
+            accountRateLimitObserver: ConnectingRateLimitObserver()
+        )
+
+        let snapshot = await repository.snapshot(now: now)
+
+        XCTAssertNil(snapshot.rateLimits)
     }
 
     func testTerminalRetentionCapsAtTwentyWithUnreadPriorityAndKeepsActive() async throws {
@@ -212,6 +309,77 @@ final class TaskRepositoryTests: XCTestCase {
         XCTAssertEqual(snapshot.tasks.filter(\.isUnread).count, 20)
     }
 
+    func testTerminalTasksWithActiveAgentsBypassRetentionAndCountCap() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+
+        let now = Date(timeIntervalSince1970: 1_700_300_000)
+        for index in 0..<20 {
+            let completion = now.addingTimeInterval(-Double(100 + index))
+            try writeRollout(
+                to: sessions.appendingPathComponent("ordinary-\(index).jsonl"),
+                threadId: "ordinary-\(index)",
+                turnId: "turn-ordinary-\(index)",
+                startedAt: completion.addingTimeInterval(-10),
+                completedAt: completion
+            )
+        }
+
+        let cappedCompletion = now.addingTimeInterval(-1_000)
+        try writeRollout(
+            to: sessions.appendingPathComponent("active-capped.jsonl"),
+            threadId: "active-capped",
+            turnId: "turn-active-capped",
+            startedAt: cappedCompletion.addingTimeInterval(-10),
+            completedAt: cappedCompletion
+        )
+        let expiredCompletion = now.addingTimeInterval(-25 * 60 * 60)
+        try writeRollout(
+            to: sessions.appendingPathComponent("active-expired.jsonl"),
+            threadId: "active-expired",
+            turnId: "turn-active-expired",
+            startedAt: expiredCompletion.addingTimeInterval(-10),
+            completedAt: expiredCompletion
+        )
+
+        let receipts = ReceiptStore(databaseURL: root.appendingPathComponent("receipts.sqlite"))
+        _ = try await receipts.snapshot(now: now.addingTimeInterval(-30 * 60 * 60))
+        let observer = StaticAgentActivityObserver(observationsByThread: [
+            "active-capped": AgentActivityObservation(
+                activeCount: 2,
+                confidence: .exact,
+                observedAt: now
+            ),
+            "active-expired": AgentActivityObservation(
+                activeCount: 1,
+                confidence: .exact,
+                observedAt: now
+            ),
+        ])
+        let repository = makeRepository(
+            root: root,
+            sessions: sessions,
+            sqliteCandidates: [],
+            receiptStore: receipts,
+            agentActivityObserver: observer
+        )
+
+        let snapshot = await repository.snapshot(now: now)
+
+        XCTAssertEqual(snapshot.tasks.filter { $0.state.isTerminal }.count, 22)
+        XCTAssertEqual(
+            snapshot.tasks.first { $0.threadId == "active-capped" }?.agentActivity?.activeCount,
+            2
+        )
+        XCTAssertEqual(
+            snapshot.tasks.first { $0.threadId == "active-expired" }?.agentActivity?.activeCount,
+            1
+        )
+    }
+
     private func writeRollout(
         to url: URL,
         startedAt: Date,
@@ -275,6 +443,7 @@ final class TaskRepositoryTests: XCTestCase {
             }
             if let rateUsed {
                 telemetryPayload["rate_limits"] = [
+                    "limit_id": "codex",
                     "plan_type": "pro",
                     "primary": [
                         "used_percent": rateUsed,
@@ -400,7 +569,9 @@ final class TaskRepositoryTests: XCTestCase {
         root: URL,
         sessions: URL,
         sqliteCandidates: [URL],
-        receiptStore: ReceiptStore
+        receiptStore: ReceiptStore,
+        accountRateLimitObserver: (any CodexAccountRateLimitObserving)? = nil,
+        agentActivityObserver: (any CodexAgentActivityObserving)? = nil
     ) -> TaskRepository {
         TaskRepository(
             appServerProbe: AppServerCapabilityProbe(
@@ -416,7 +587,9 @@ final class TaskRepositoryTests: XCTestCase {
             journalReader: PluginEventJournalReader(
                 journalURL: root.appendingPathComponent("missing-events.jsonl")
             ),
-            receiptStore: receiptStore
+            receiptStore: receiptStore,
+            accountRateLimitObserver: accountRateLimitObserver,
+            agentActivityObserver: agentActivityObserver
         )
     }
 
@@ -436,5 +609,37 @@ final class TaskRepositoryTests: XCTestCase {
             result.append(0x0A)
         }
         try data.write(to: url)
+    }
+}
+
+private struct StaticRateLimitObserver: CodexAccountRateLimitObserving {
+    let snapshot: RateLimitSnapshot
+
+    func observation(now: Date) async -> CodexAccountRateLimitObservation {
+        CodexAccountRateLimitObservation(
+            snapshot: snapshot,
+            health: .healthy(.appServer, at: now)
+        )
+    }
+}
+
+private struct ConnectingRateLimitObserver: CodexAccountRateLimitObserving {
+    func observation(now: Date) async -> CodexAccountRateLimitObservation {
+        CodexAccountRateLimitObservation(
+            snapshot: nil,
+            health: .unavailable(.appServer, message: "Connecting"),
+            fallbackAllowed: false
+        )
+    }
+}
+
+private struct StaticAgentActivityObserver: CodexAgentActivityObserving {
+    let observationsByThread: [String: AgentActivityObservation]
+
+    func observations(
+        rootStates: [String: PulseTaskState],
+        now: Date
+    ) async -> [String: AgentActivityObservation] {
+        observationsByThread.filter { rootStates[$0.key] != nil }
     }
 }

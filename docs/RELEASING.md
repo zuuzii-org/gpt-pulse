@@ -1,6 +1,6 @@
 # GPT Pulse 发布流程
 
-本文档用于发布 GPT Pulse macOS 应用和配套的 Codex 插件。当前基准版本为 `0.1.0`，品牌署名统一使用 **Zuuzii**。
+本文档用于发布 GPT Pulse macOS 应用和配套的 Codex 插件。当前基准版本为 `1.0.0`，品牌署名统一使用 **Zuuzii**。
 
 ## 发布原则
 
@@ -43,7 +43,7 @@ xcrun notarytool history --keychain-profile "GPTPulseNotary" >/dev/null
 ## 1. 锁定版本与源码
 
 ```bash
-export VERSION="0.1.0"
+export VERSION="1.0.0"
 export TAG="v${VERSION}"
 export NOTARY_PROFILE="GPTPulseNotary"
 
@@ -89,8 +89,8 @@ umask 077
 预期产物：
 
 ```text
-dist/GPT-Pulse-0.1.0.dmg
-dist/GPT-Pulse-0.1.0.dmg.sha256
+dist/GPT-Pulse-1.0.0.dmg
+dist/GPT-Pulse-1.0.0.dmg.sha256
 ```
 
 脚本只生成本地产物，不应自动创建 tag、推送 Git 或公开 GitHub Release。

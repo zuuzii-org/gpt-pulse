@@ -41,8 +41,8 @@ scripts/release.sh --team-id "<Team ID>"
 默认产物：
 
 ```text
-dist/GPT-Pulse-0.1.0.dmg
-dist/GPT-Pulse-0.1.0.dmg.sha256
+dist/GPT-Pulse-1.0.0.dmg
+dist/GPT-Pulse-1.0.0.dmg.sha256
 ```
 
 中断后可按阶段恢复：
@@ -55,7 +55,9 @@ scripts/release.sh --stage notarize-dmg
 scripts/release.sh --stage verify
 ```
 
-`build` 会重建 `.build/release/DerivedData`；后续阶段复用该 App 和默认 DMG 路径。`package` 会拒绝未 staple 的 App，避免把仅签名但未公证的 App 放入 DMG。
+`build` 会重建 `.build/release/DerivedData`、移除同版本旧 DMG，并在 `.build/release/work-vVERSION/release-manifest.plist` 原子写入当前 Git `HEAD`、版本、build 与输出目录。每个后续阶段都会在读取 App 或 DMG 前强制校验该 manifest；只要切换了 commit、版本/build 或输出目录，就必须重新执行 `--stage build`，不会复用来源不明的旧产物。`package` 还会拒绝未 staple 的 App，避免把仅签名但未公证的 App 放入 DMG。
+
+`DRY_RUN=1` 会打印 manifest 的写入与校验步骤；单独演练后续阶段时，如果磁盘上已有 manifest，也会实际比较其来源字段并拒绝不匹配值。没有 manifest 时只打印正式运行将执行的要求，不会为了演练创建文件。
 
 DMG 默认将 `Assets/Release/dmg-background.png` 和相邻的 `dmg-background@2x.png` 合成为 HiDPI TIFF，并从构建出的 App 复用 `AppIcon.icns` 作为卷图标。也可以显式覆盖背景和卷图标：
 

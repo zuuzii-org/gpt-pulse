@@ -1,0 +1,174 @@
+import Foundation
+import XCTest
+@testable import GPTPulse
+
+final class RolloutRateLimitSelectorTests: XCTestCase {
+    func testSelectsOneCanonicalSnapshotWithoutMixingModelPool() throws {
+        let now = Date(timeIntervalSince1970: 1_783_751_200)
+        let canonical = snapshot(
+            limitID: "codex",
+            fiveHourUsed: 2,
+            weeklyUsed: 0,
+            fiveHourReset: now.addingTimeInterval(16_514),
+            weeklyReset: now.addingTimeInterval(603_314),
+            updatedAt: now.addingTimeInterval(-5)
+        )
+        let modelPool = snapshot(
+            limitID: "codex_bengalfox",
+            fiveHourUsed: 99,
+            weeklyUsed: 88,
+            fiveHourReset: now.addingTimeInterval(1_000),
+            weeklyReset: now.addingTimeInterval(2_000),
+            updatedAt: now
+        )
+
+        let selected = try XCTUnwrap(
+            RolloutRateLimitSelector.select([modelPool, canonical], now: now)
+        )
+
+        XCTAssertEqual(selected, canonical)
+        XCTAssertEqual(selected.limitID, "codex")
+        XCTAssertEqual(selected.fiveHour?.usedPercent, 2)
+        XCTAssertEqual(selected.weekly?.usedPercent, 0)
+    }
+
+    func testConflictingCanonicalResetGroupsAreRejectedInsteadOfGuessed() {
+        let now = Date(timeIntervalSince1970: 1_783_751_200)
+        let olderGroup = snapshot(
+            limitID: "codex",
+            fiveHourUsed: 5,
+            weeklyUsed: 5,
+            fiveHourReset: Date(timeIntervalSince1970: 1_783_759_226),
+            weeklyReset: Date(timeIntervalSince1970: 1_784_309_816),
+            updatedAt: now.addingTimeInterval(-20)
+        )
+        let settingsGroup = snapshot(
+            limitID: "codex",
+            fiveHourUsed: 2,
+            weeklyUsed: 0,
+            fiveHourReset: Date(timeIntervalSince1970: 1_783_767_714),
+            weeklyReset: Date(timeIntervalSince1970: 1_784_354_514),
+            updatedAt: now.addingTimeInterval(-10)
+        )
+
+        XCTAssertNil(
+            RolloutRateLimitSelector.select([olderGroup, settingsGroup], now: now)
+        )
+    }
+
+    func testFreshOlderGroupCannotHideAStillValidStaleConflict() {
+        let now = Date(timeIntervalSince1970: 1_783_751_200)
+        let freshOlderGroup = snapshot(
+            limitID: "codex",
+            fiveHourUsed: 5,
+            weeklyUsed: 5,
+            fiveHourReset: Date(timeIntervalSince1970: 1_783_759_226),
+            weeklyReset: Date(timeIntervalSince1970: 1_784_309_816),
+            updatedAt: now.addingTimeInterval(-10)
+        )
+        let staleSettingsGroup = snapshot(
+            limitID: "codex",
+            fiveHourUsed: 2,
+            weeklyUsed: 0,
+            fiveHourReset: Date(timeIntervalSince1970: 1_783_767_714),
+            weeklyReset: Date(timeIntervalSince1970: 1_784_354_514),
+            updatedAt: now.addingTimeInterval(-20 * 60)
+        )
+
+        XCTAssertNil(
+            RolloutRateLimitSelector.select(
+                [freshOlderGroup, staleSettingsGroup],
+                now: now
+            )
+        )
+    }
+
+    func testResetJitterWithinOneMinuteUsesLatestAtomicSnapshot() throws {
+        let now = Date(timeIntervalSince1970: 1_783_751_200)
+        let earlier = snapshot(
+            limitID: nil,
+            fiveHourUsed: 70,
+            weeklyUsed: 80,
+            fiveHourReset: now.addingTimeInterval(3_000),
+            weeklyReset: now.addingTimeInterval(300_000),
+            updatedAt: now.addingTimeInterval(-20)
+        )
+        let latest = snapshot(
+            limitID: nil,
+            fiveHourUsed: 8,
+            weeklyUsed: 9,
+            fiveHourReset: now.addingTimeInterval(3_030),
+            weeklyReset: now.addingTimeInterval(300_030),
+            updatedAt: now.addingTimeInterval(-5)
+        )
+
+        let selected = try XCTUnwrap(
+            RolloutRateLimitSelector.select([earlier, latest], now: now)
+        )
+
+        XCTAssertEqual(selected, latest)
+        XCTAssertEqual(selected.fiveHour?.usedPercent, 8)
+        XCTAssertEqual(selected.weekly?.usedPercent, 9)
+    }
+
+    func testPartialOrExpiredSnapshotsAreRejected() {
+        let now = Date(timeIntervalSince1970: 1_783_751_200)
+        let partial = RateLimitSnapshot(
+            fiveHour: window(used: 10, minutes: 300, reset: now.addingTimeInterval(60), observedAt: now),
+            weekly: nil,
+            updatedAt: now,
+            limitID: "codex"
+        )
+        let expired = snapshot(
+            limitID: "codex",
+            fiveHourUsed: 10,
+            weeklyUsed: 20,
+            fiveHourReset: now.addingTimeInterval(-1),
+            weeklyReset: now.addingTimeInterval(60),
+            updatedAt: now
+        )
+
+        XCTAssertNil(RolloutRateLimitSelector.select([partial, expired], now: now))
+    }
+
+    private func snapshot(
+        limitID: String?,
+        fiveHourUsed: Double,
+        weeklyUsed: Double,
+        fiveHourReset: Date,
+        weeklyReset: Date,
+        updatedAt: Date
+    ) -> RateLimitSnapshot {
+        RateLimitSnapshot(
+            fiveHour: window(
+                used: fiveHourUsed,
+                minutes: 300,
+                reset: fiveHourReset,
+                observedAt: updatedAt
+            ),
+            weekly: window(
+                used: weeklyUsed,
+                minutes: 10_080,
+                reset: weeklyReset,
+                observedAt: updatedAt
+            ),
+            updatedAt: updatedAt,
+            planType: "pro",
+            limitID: limitID
+        )
+    }
+
+    private func window(
+        used: Double,
+        minutes: Int,
+        reset: Date,
+        observedAt: Date
+    ) -> RateLimitWindowSnapshot {
+        RateLimitWindowSnapshot(
+            usedPercent: used,
+            windowMinutes: minutes,
+            resetsAt: reset,
+            observedAt: observedAt
+        )
+    }
+}

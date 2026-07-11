@@ -329,7 +329,7 @@ final class RolloutJSONLTailParserTests: XCTestCase {
         XCTAssertEqual(reevaluated?.tokenUsage, initial?.tokenUsage)
     }
 
-    func testRateLimitsAreIdentifiedByWindowAndNullDoesNotErasePriorValues() throws {
+    func testRateLimitEventsRemainAtomicAndNullPayloadDoesNotEraseLatestEvent() throws {
         let parser = RolloutJSONLTailParser()
         let firstRateAt = start.addingTimeInterval(1)
         let weeklyUpdateAt = start.addingTimeInterval(2)
@@ -341,6 +341,7 @@ final class RolloutJSONLTailParserTests: XCTestCase {
                 event("token_count", timestamp: firstRateAt, payload: [
                     "info": NSNull(),
                     "rate_limits": [
+                        "limit_id": "codex",
                         "plan_type": "pro",
                         "primary": rateWindow(used: 12, minutes: 300, reset: start.addingTimeInterval(300)),
                         "secondary": rateWindow(used: 30, minutes: 10_080, reset: start.addingTimeInterval(600)),
@@ -349,6 +350,7 @@ final class RolloutJSONLTailParserTests: XCTestCase {
                 event("token_count", timestamp: weeklyUpdateAt, payload: [
                     "info": NSNull(),
                     "rate_limits": [
+                        "limit_id": NSNull(),
                         "plan_type": NSNull(),
                         "primary": NSNull(),
                         "secondary": rateWindow(used: 31, minutes: 10_080, reset: start.addingTimeInterval(900)),
@@ -363,12 +365,94 @@ final class RolloutJSONLTailParserTests: XCTestCase {
             now: start.addingTimeInterval(3)
         )
 
-        XCTAssertEqual(status?.rateLimits?.updatedAt, weeklyUpdateAt)
+        XCTAssertEqual(status?.rateLimits?.updatedAt, firstRateAt)
+        XCTAssertEqual(status?.rateLimits?.limitID, "codex")
         XCTAssertEqual(status?.rateLimits?.planType, "pro")
         XCTAssertEqual(status?.rateLimits?.fiveHour?.usedPercent, 12)
-        XCTAssertEqual(status?.rateLimits?.fiveHour?.windowMinutes, 300)
-        XCTAssertEqual(status?.rateLimits?.weekly?.usedPercent, 31)
+        XCTAssertEqual(status?.rateLimits?.weekly?.usedPercent, 30)
         XCTAssertEqual(status?.rateLimits?.weekly?.windowMinutes, 10_080)
+        XCTAssertEqual(status?.rateLimits?.weekly?.observedAt, firstRateAt)
+    }
+
+    func testConflictingCompleteResetGroupsInOneRolloutAreMarkedAmbiguous() throws {
+        let parser = RolloutJSONLTailParser()
+        let firstAt = start.addingTimeInterval(1)
+        let secondAt = start.addingTimeInterval(2)
+        let secondWeeklyReset = start.addingTimeInterval(1_200)
+        let status = parser.parse(
+            threadId: threadId,
+            defaultStartedAt: start,
+            tail: try jsonLines([
+                event("task_started", timestamp: start, payload: ["turn_id": turnId]),
+                event("token_count", timestamp: firstAt, payload: [
+                    "info": NSNull(),
+                    "rate_limits": [
+                        "limit_id": "codex",
+                        "plan_type": "pro",
+                        "primary": rateWindow(used: 5, minutes: 300, reset: start.addingTimeInterval(300)),
+                        "secondary": rateWindow(used: 5, minutes: 10_080, reset: start.addingTimeInterval(600)),
+                    ],
+                ]),
+                event("token_count", timestamp: secondAt, payload: [
+                    "info": NSNull(),
+                    "rate_limits": [
+                        "limit_id": "codex",
+                        "plan_type": "pro",
+                        "primary": rateWindow(used: 2, minutes: 300, reset: start.addingTimeInterval(900)),
+                        "secondary": rateWindow(used: 0, minutes: 10_080, reset: secondWeeklyReset),
+                    ],
+                ]),
+            ]),
+            fileModificationDate: secondAt,
+            now: secondAt
+        )
+
+        XCTAssertEqual(status?.rateLimits?.updatedAt, secondAt)
+        XCTAssertEqual(status?.rateLimits?.conflictingResetHistoryUntil, secondWeeklyReset)
+        XCTAssertNil(
+            status?.rateLimits.flatMap {
+                RolloutRateLimitSelector.select([$0], now: secondAt)
+            }
+        )
+    }
+
+    func testPartialDifferentLimitGroupDoesNotReplaceCompleteSnapshot() throws {
+        let parser = RolloutJSONLTailParser()
+        let initialAt = start.addingTimeInterval(1)
+        let switchedAt = start.addingTimeInterval(2)
+        let status = parser.parse(
+            threadId: threadId,
+            defaultStartedAt: start,
+            tail: try jsonLines([
+                event("task_started", timestamp: start, payload: ["turn_id": turnId]),
+                event("token_count", timestamp: initialAt, payload: [
+                    "info": NSNull(),
+                    "rate_limits": [
+                        "limit_id": "codex",
+                        "plan_type": "pro",
+                        "primary": rateWindow(used: 12, minutes: 300, reset: start.addingTimeInterval(300)),
+                        "secondary": rateWindow(used: 30, minutes: 10_080, reset: start.addingTimeInterval(600)),
+                    ],
+                ]),
+                event("token_count", timestamp: switchedAt, payload: [
+                    "info": NSNull(),
+                    "rate_limits": [
+                        "limit_id": "codex_bengalfox",
+                        "plan_type": "pro",
+                        "primary": rateWindow(used: 7, minutes: 300, reset: start.addingTimeInterval(900)),
+                        "secondary": NSNull(),
+                    ],
+                ]),
+            ]),
+            fileModificationDate: switchedAt,
+            now: switchedAt
+        )
+
+        XCTAssertEqual(status?.rateLimits?.updatedAt, initialAt)
+        XCTAssertEqual(status?.rateLimits?.limitID, "codex")
+        XCTAssertEqual(status?.rateLimits?.fiveHour?.usedPercent, 12)
+        XCTAssertEqual(status?.rateLimits?.fiveHour?.observedAt, initialAt)
+        XCTAssertEqual(status?.rateLimits?.weekly?.usedPercent, 30)
     }
 
     private func event(

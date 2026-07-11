@@ -2,15 +2,153 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
+enum TaskPanelPresentationSource: Equatable, Sendable {
+    case edgeHover
+    case statusItemClick
+    case programmatic
+}
+
+struct TaskPanelAutomaticDismissState: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case hidden
+        case statusClickGrace(deadline: TimeInterval, token: UInt64)
+        case pointerTracking
+        case hoverHeld
+        case pointerExitGrace(deadline: TimeInterval, token: UInt64)
+    }
+
+    enum Effect: Equatable, Sendable {
+        case cancelTimer
+        case scheduleTimer(token: UInt64, delay: TimeInterval)
+        case hide
+    }
+
+    private(set) var phase: Phase = .hidden
+
+    private let statusClickDisplayDuration: TimeInterval
+    private let pointerExitDismissDelay: TimeInterval
+    private var nextToken: UInt64 = 0
+
+    init(
+        statusClickDisplayDuration: TimeInterval,
+        pointerExitDismissDelay: TimeInterval
+    ) {
+        self.statusClickDisplayDuration = statusClickDisplayDuration
+        self.pointerExitDismissDelay = pointerExitDismissDelay
+    }
+
+    mutating func present(
+        source: TaskPanelPresentationSource,
+        at uptime: TimeInterval,
+        pointerInside: Bool
+    ) -> [Effect] {
+        invalidateScheduledTimer()
+
+        switch source {
+        case .statusItemClick:
+            let token = makeToken()
+            phase = .statusClickGrace(
+                deadline: uptime + statusClickDisplayDuration,
+                token: token
+            )
+            return [
+                .cancelTimer,
+                .scheduleTimer(token: token, delay: statusClickDisplayDuration),
+            ]
+        case .edgeHover, .programmatic:
+            phase = pointerInside ? .hoverHeld : .pointerTracking
+            return [.cancelTimer]
+        }
+    }
+
+    mutating func pointerMoved(
+        inside: Bool,
+        at uptime: TimeInterval
+    ) -> [Effect] {
+        guard phase != .hidden else { return [] }
+
+        if inside {
+            switch phase {
+            case .hoverHeld:
+                return []
+            case .hidden:
+                return []
+            case .statusClickGrace, .pointerTracking, .pointerExitGrace:
+                invalidateScheduledTimer()
+                phase = .hoverHeld
+                return [.cancelTimer]
+            }
+        }
+
+        switch phase {
+        case .hidden, .statusClickGrace, .pointerExitGrace:
+            return []
+        case .pointerTracking, .hoverHeld:
+            let token = makeToken()
+            phase = .pointerExitGrace(
+                deadline: uptime + pointerExitDismissDelay,
+                token: token
+            )
+            return [
+                .cancelTimer,
+                .scheduleTimer(token: token, delay: pointerExitDismissDelay),
+            ]
+        }
+    }
+
+    mutating func timerFired(
+        token: UInt64,
+        at uptime: TimeInterval,
+        pointerInside: Bool
+    ) -> [Effect] {
+        switch phase {
+        case let .statusClickGrace(deadline, currentToken),
+             let .pointerExitGrace(deadline, currentToken):
+            guard token == currentToken else { return [] }
+            if uptime + 0.000_001 < deadline {
+                return [
+                    .scheduleTimer(token: token, delay: max(0, deadline - uptime)),
+                ]
+            }
+            if pointerInside {
+                invalidateScheduledTimer()
+                phase = .hoverHeld
+                return [.cancelTimer]
+            }
+            invalidateScheduledTimer()
+            phase = .hidden
+            return [.hide]
+        case .hidden, .pointerTracking, .hoverHeld:
+            return []
+        }
+    }
+
+    mutating func reset() -> [Effect] {
+        invalidateScheduledTimer()
+        phase = .hidden
+        return [.cancelTimer]
+    }
+
+    private mutating func makeToken() -> UInt64 {
+        nextToken &+= 1
+        return nextToken
+    }
+
+    private mutating func invalidateScheduledTimer() {
+        nextToken &+= 1
+    }
+}
+
 @MainActor
 final class TaskPanelController: NSObject, NSWindowDelegate {
     private let panel: PulsePanel
     private let width: CGFloat
-    private let dismissDelay: TimeInterval
 
     private var localEventMonitor: Any?
     private var globalEventMonitor: Any?
-    private var dismissTimer: Timer?
+    private var automaticDismissTimer: Timer?
+    private var automaticDismissTimerToken: UInt64?
+    private var automaticDismissState: TaskPanelAutomaticDismissState
     private weak var outsideDismissExcludedView: NSView?
     private(set) var isVisible = false
     private var presentationGeneration: UInt64 = 0
@@ -19,10 +157,14 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
     init<Content: View>(
         width: CGFloat,
         dismissDelay: TimeInterval,
+        statusItemDisplayDuration: TimeInterval,
         rootView: Content
     ) {
         self.width = width
-        self.dismissDelay = dismissDelay
+        automaticDismissState = TaskPanelAutomaticDismissState(
+            statusClickDisplayDuration: statusItemDisplayDuration,
+            pointerExitDismissDelay: dismissDelay
+        )
         panel = PulsePanel(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
@@ -52,21 +194,29 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
         outsideDismissExcludedView = view
     }
 
-    func toggle(on screen: NSScreen) {
+    func toggleFromStatusItem(on screen: NSScreen) {
         if isVisible {
             hide()
         } else {
-            show(on: screen)
+            show(on: screen, source: .statusItemClick)
         }
     }
 
-    func show(on screen: NSScreen) {
+    func show(
+        on screen: NSScreen,
+        source: TaskPanelPresentationSource = .programmatic
+    ) {
         presentationGeneration &+= 1
-        cancelDismissTimer()
+        cancelAutomaticDismissTimer()
         installEventMonitors()
 
         let targetFrame = panelFrame(on: screen)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let automaticDismissEffects = automaticDismissState.present(
+            source: source,
+            at: ProcessInfo.processInfo.systemUptime,
+            pointerInside: targetFrame.contains(NSEvent.mouseLocation)
+        )
 
         isVisible = true
         panel.alphaValue = reduceMotion ? 1 : 0
@@ -90,6 +240,8 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
                 panel.animator().alphaValue = 1
             }
         }
+
+        applyAutomaticDismissEffects(automaticDismissEffects)
     }
 
     func hide() {
@@ -97,7 +249,8 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
         presentationGeneration &+= 1
         let hideGeneration = presentationGeneration
         isVisible = false
-        cancelDismissTimer()
+        _ = automaticDismissState.reset()
+        cancelAutomaticDismissTimer()
         removeEventMonitors()
 
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -130,23 +283,17 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
 
     func handlePointerMove(to location: CGPoint) {
         guard isVisible, !preventsAutomaticDismiss else { return }
-
-        if panel.frame.contains(location) {
-            cancelDismissTimer()
-        } else if dismissTimer == nil {
-            let timer = Timer(timeInterval: dismissDelay, repeats: false) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.hide()
-                }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            dismissTimer = timer
-        }
+        let effects = automaticDismissState.pointerMoved(
+            inside: panel.frame.contains(location),
+            at: ProcessInfo.processInfo.systemUptime
+        )
+        applyAutomaticDismissEffects(effects)
     }
 
     func windowWillClose(_ notification: Notification) {
         isVisible = false
-        cancelDismissTimer()
+        _ = automaticDismissState.reset()
+        cancelAutomaticDismissTimer()
         removeEventMonitors()
     }
 
@@ -200,7 +347,10 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
         globalEventMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
-            Task { @MainActor in
+            // AppKit invokes event-monitor handlers on the main thread. Handle
+            // the click synchronously so an old event cannot be queued across a
+            // fast hide/reopen cycle and close the new presentation.
+            MainActor.assumeIsolated {
                 guard let self, self.isVisible,
                       !self.preventsAutomaticDismiss,
                       !self.panel.frame.contains(NSEvent.mouseLocation) else {
@@ -222,9 +372,54 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func cancelDismissTimer() {
-        dismissTimer?.invalidate()
-        dismissTimer = nil
+    private func applyAutomaticDismissEffects(
+        _ effects: [TaskPanelAutomaticDismissState.Effect]
+    ) {
+        for effect in effects {
+            switch effect {
+            case .cancelTimer:
+                cancelAutomaticDismissTimer()
+            case let .scheduleTimer(token, delay):
+                scheduleAutomaticDismissTimer(token: token, delay: delay)
+            case .hide:
+                hide()
+            }
+        }
+    }
+
+    private func scheduleAutomaticDismissTimer(
+        token: UInt64,
+        delay: TimeInterval
+    ) {
+        cancelAutomaticDismissTimer()
+
+        let timer = Timer(timeInterval: max(0.001, delay), repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self,
+                      self.automaticDismissTimerToken == token else {
+                    return
+                }
+                self.automaticDismissTimer = nil
+                self.automaticDismissTimerToken = nil
+                guard self.isVisible, !self.preventsAutomaticDismiss else { return }
+
+                let effects = self.automaticDismissState.timerFired(
+                    token: token,
+                    at: ProcessInfo.processInfo.systemUptime,
+                    pointerInside: self.panel.frame.contains(NSEvent.mouseLocation)
+                )
+                self.applyAutomaticDismissEffects(effects)
+            }
+        }
+        automaticDismissTimerToken = token
+        RunLoop.main.add(timer, forMode: .common)
+        automaticDismissTimer = timer
+    }
+
+    private func cancelAutomaticDismissTimer() {
+        automaticDismissTimer?.invalidate()
+        automaticDismissTimer = nil
+        automaticDismissTimerToken = nil
     }
 }
 

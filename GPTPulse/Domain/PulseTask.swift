@@ -13,6 +13,7 @@ struct PulseTask: Identifiable, Codable, Equatable, Sendable {
     let lastStatus: String
     let isUnread: Bool
     let tokenUsage: TokenUsageSnapshot?
+    let agentActivity: AgentActivityObservation?
 
     init(
         threadId: String,
@@ -25,7 +26,8 @@ struct PulseTask: Identifiable, Codable, Equatable, Sendable {
         completedAt: Date? = nil,
         lastStatus: String,
         isUnread: Bool = false,
-        tokenUsage: TokenUsageSnapshot? = nil
+        tokenUsage: TokenUsageSnapshot? = nil,
+        agentActivity: AgentActivityObservation? = nil
     ) {
         self.threadId = threadId
         self.turnId = turnId
@@ -39,6 +41,7 @@ struct PulseTask: Identifiable, Codable, Equatable, Sendable {
         self.lastStatus = lastStatus
         self.isUnread = isUnread
         self.tokenUsage = tokenUsage
+        self.agentActivity = agentActivity
     }
 
     var workingDirectory: String { projectDirectory }

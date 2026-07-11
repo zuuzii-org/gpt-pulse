@@ -1,6 +1,6 @@
 {
   "name": "gpt-pulse",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Privacy-minimized Codex lifecycle events for the GPT Pulse macOS companion app.",
   "author": {
     "name": "Zuuzii"

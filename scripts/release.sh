@@ -36,6 +36,10 @@ CHECKSUM_PATH=""
 MOUNT_DIR=""
 MOUNTED=0
 RESOLVED_SIGNING_IDENTITY=""
+SOURCE_BUILD=""
+CURRENT_GIT_HEAD=""
+MANIFEST_PATH=""
+MANIFEST_PLANNED=0
 
 usage() {
   cat <<'EOF'
@@ -223,6 +227,7 @@ parse_arguments() {
 initialize_paths() {
   local source_version
   source_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$INFO_PLIST")"
+  SOURCE_BUILD="$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$INFO_PLIST")"
   if [[ -z "$VERSION" ]]; then
     VERSION="$source_version"
   fi
@@ -256,6 +261,7 @@ initialize_paths() {
   DMG_PATH="$OUTPUT_DIR/GPT-Pulse-$VERSION.dmg"
   CHECKSUM_PATH="$DMG_PATH.sha256"
   MOUNT_DIR="$WORK_DIR/mount"
+  MANIFEST_PATH="$WORK_DIR/release-manifest.plist"
 }
 
 validate_options() {
@@ -296,6 +302,67 @@ require_clean_worktree() {
   status="$(/usr/bin/git -C "$REPO_ROOT" status --porcelain --untracked-files=all)"
   [[ -z "$status" ]] || \
     die "Git worktree is not clean; commit changes before producing release artifacts"
+}
+
+resolve_git_head() {
+  CURRENT_GIT_HEAD="$(/usr/bin/git -C "$REPO_ROOT" rev-parse --verify HEAD 2>/dev/null || true)"
+  if [[ -z "$CURRENT_GIT_HEAD" ]]; then
+    if is_true "$DRY_RUN" && is_true "$ALLOW_DIRTY"; then
+      CURRENT_GIT_HEAD="UNBORN"
+      warn "release manifest rehearsal is using an unborn Git HEAD"
+      return
+    fi
+    die "release provenance requires a committed Git HEAD"
+  fi
+}
+
+write_release_manifest() {
+  local temporary_manifest="$MANIFEST_PATH.tmp"
+  log "recording release provenance for Git HEAD $CURRENT_GIT_HEAD"
+  run /bin/mkdir -p "$WORK_DIR"
+  run /bin/rm -f "$temporary_manifest"
+  run /usr/bin/plutil -create xml1 "$temporary_manifest"
+  run /usr/bin/plutil -insert schemaVersion -integer 1 "$temporary_manifest"
+  run /usr/bin/plutil -insert gitHead -string "$CURRENT_GIT_HEAD" "$temporary_manifest"
+  run /usr/bin/plutil -insert version -string "$VERSION" "$temporary_manifest"
+  run /usr/bin/plutil -insert build -string "$SOURCE_BUILD" "$temporary_manifest"
+  run /usr/bin/plutil -insert outputDirectory -string "$OUTPUT_DIR" "$temporary_manifest"
+  run /bin/mv "$temporary_manifest" "$MANIFEST_PATH"
+  MANIFEST_PLANNED=1
+}
+
+validate_release_manifest() {
+  local manifest_head manifest_version manifest_build manifest_output manifest_schema
+
+  if is_true "$DRY_RUN" && [[ "$MANIFEST_PLANNED" -eq 1 ]]; then
+    log "[dry-run] validate manifest HEAD=$CURRENT_GIT_HEAD version=$VERSION build=$SOURCE_BUILD output=$OUTPUT_DIR"
+    return
+  fi
+  if [[ ! -f "$MANIFEST_PATH" ]]; then
+    if is_true "$DRY_RUN"; then
+      log "[dry-run] require $MANIFEST_PATH and validate HEAD, version, build, and output directory"
+      return
+    fi
+    die "release manifest not found: $MANIFEST_PATH; run --stage build from the current commit"
+  fi
+
+  manifest_schema="$(/usr/bin/plutil -extract schemaVersion raw -o - "$MANIFEST_PATH" 2>/dev/null || true)"
+  manifest_head="$(/usr/bin/plutil -extract gitHead raw -o - "$MANIFEST_PATH" 2>/dev/null || true)"
+  manifest_version="$(/usr/bin/plutil -extract version raw -o - "$MANIFEST_PATH" 2>/dev/null || true)"
+  manifest_build="$(/usr/bin/plutil -extract build raw -o - "$MANIFEST_PATH" 2>/dev/null || true)"
+  manifest_output="$(/usr/bin/plutil -extract outputDirectory raw -o - "$MANIFEST_PATH" 2>/dev/null || true)"
+
+  [[ "$manifest_schema" == "1" ]] || \
+    die "unsupported or corrupt release manifest: $MANIFEST_PATH"
+  [[ "$manifest_head" == "$CURRENT_GIT_HEAD" ]] || \
+    die "release manifest HEAD $manifest_head does not match current HEAD $CURRENT_GIT_HEAD; rebuild"
+  [[ "$manifest_version" == "$VERSION" ]] || \
+    die "release manifest version $manifest_version does not match $VERSION; rebuild"
+  [[ "$manifest_build" == "$SOURCE_BUILD" ]] || \
+    die "release manifest build $manifest_build does not match $SOURCE_BUILD; rebuild"
+  [[ "$manifest_output" == "$OUTPUT_DIR" ]] || \
+    die "release manifest output $manifest_output does not match $OUTPUT_DIR; rebuild"
+  log "validated release provenance for Git HEAD $CURRENT_GIT_HEAD"
 }
 
 resolve_signing_identity() {
@@ -443,6 +510,7 @@ build_and_sign_app() {
   safe_remove_release_path "$DERIVED_DATA"
   safe_remove_release_path "$WORK_DIR"
   run /bin/mkdir -p "$OUTPUT_DIR"
+  run /bin/rm -f "$DMG_PATH" "$CHECKSUM_PATH"
 
   run "$(command -v xcodegen)" generate --spec "$PROJECT_SPEC"
   require_clean_worktree
@@ -471,6 +539,8 @@ build_and_sign_app() {
   run /usr/bin/codesign --force --options runtime --timestamp \
     --generate-entitlement-der --sign "$RESOLVED_SIGNING_IDENTITY" "$APP_PATH"
   verify_app_signature "$APP_PATH"
+  write_release_manifest
+  validate_release_manifest
   log "signed app ready: $APP_PATH"
 }
 
@@ -548,6 +618,7 @@ notarize_artifact() {
 notarize_and_staple_app() {
   log "notarizing the signed app"
   require_clean_worktree
+  validate_release_manifest
   verify_universal_code "$APP_PATH"
   verify_app_signature "$APP_PATH"
   run /bin/mkdir -p "$WORK_DIR"
@@ -632,6 +703,7 @@ create_and_sign_dmg() {
 
   log "creating signed DMG"
   require_clean_worktree
+  validate_release_manifest
   verify_app_signature "$APP_PATH"
   run /usr/bin/xcrun stapler validate -v "$APP_PATH"
   resolve_signing_identity
@@ -694,6 +766,7 @@ create_and_sign_dmg() {
 notarize_and_staple_dmg() {
   log "notarizing the signed DMG"
   require_clean_worktree
+  validate_release_manifest
   verify_dmg_signature "$DMG_PATH"
   run /usr/bin/hdiutil verify "$DMG_PATH"
   notarize_artifact "$DMG_PATH" dmg
@@ -711,6 +784,7 @@ verify_final_release() {
   local getfileinfo_path volume_attributes
   log "performing final offline verification"
   require_clean_worktree
+  validate_release_manifest
   require_file "$DMG_PATH"
   run /usr/bin/xcrun stapler validate -v "$DMG_PATH"
   verify_dmg_signature "$DMG_PATH"
@@ -755,6 +829,7 @@ verify_final_release() {
 
 write_checksum() {
   local dmg_basename checksum_basename
+  validate_release_manifest
   require_file "$DMG_PATH"
   dmg_basename="$(basename "$DMG_PATH")"
   checksum_basename="$(basename "$CHECKSUM_PATH")"
@@ -791,6 +866,7 @@ preflight() {
     require_command osascript
   fi
   require_clean_worktree
+  resolve_git_head
 }
 
 run_stage() {
