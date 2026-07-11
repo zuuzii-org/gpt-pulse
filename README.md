@@ -17,11 +17,27 @@
   <a href="LICENSE">MIT License</a>
 </p>
 
-![GPT Pulse brand artwork: Codex tasks, always in sight](Assets/Release/github-social-preview.png)
-
-GPT Pulse is an independent, open-source macOS menu bar companion for **Codex Desktop**. It puts running tasks, work waiting for approval or input, recent completions, active agent totals, token use, and Codex usage-limit reset times in a right-edge sidebar. GPT Pulse reads local Codex data and never changes Codex task records.
+**GPT Pulse is an open-source native macOS menu bar task monitor for Codex Desktop.** It keeps running tasks, work waiting for approval or input, recent completions, active agent totals, token usage, and usage-limit reset times visible in one right-edge sidebar. GPT Pulse reads local Codex data and never changes Codex task records.
 
 The app interface is currently in Simplified Chinese. This documentation is available in English and Simplified Chinese.
+
+<p align="center">
+  <img src="Assets/Release/product-sidebar.png" width="400" alt="GPT Pulse sidebar showing running Codex tasks, approval requests, active agents, recent completions, token usage, and usage-limit reset times">
+</p>
+
+## Product facts
+
+| | |
+|---|---|
+| **Product** | GPT Pulse |
+| **Developer** | Zuuzii |
+| **Platform** | macOS 14 or later; Apple Silicon and Intel |
+| **Category** | Codex Desktop task monitor and menu bar companion |
+| **Task scope** | Local root tasks created by Codex Desktop |
+| **Data model** | Local, read-only adapters; no task analytics service |
+| **Network use** | GitHub Releases for optional update checks and downloads |
+| **License** | MIT |
+| **Affiliation** | Independent project; not an OpenAI product |
 
 ## Download
 
@@ -31,7 +47,6 @@ Release assets include:
 
 - `GPT-Pulse-1.2.0.dmg`
 - `GPT-Pulse-1.2.0.dmg.sha256`
-- `appcast.xml` for Sparkle update checks
 
 To verify the download, place both files in the same folder and run:
 
@@ -39,7 +54,7 @@ To verify the download, place both files in the same folder and run:
 shasum -a 256 -c GPT-Pulse-1.2.0.dmg.sha256
 ```
 
-If you are using v1.0.0, install v1.1.0 manually once. v1.0.0 did not include Sparkle, so it cannot discover the update channel. From v1.1.0 onward, right-click the menu bar item and choose `检查更新…` (“Check for Updates…”) to update in place.
+If you are using v1.0.0, install v1.1.0 manually once. v1.0.0 did not include in-app updates, so it cannot discover the update channel. From v1.1.0 onward, right-click the menu bar item and choose `检查更新…` (“Check for Updates…”) to update in place.
 
 ## What GPT Pulse shows
 
@@ -78,13 +93,7 @@ GPT Pulse is designed as a read-only observer:
 - Viewed receipts, notification settings, and usage-warning deduplication keys stay on the Mac. Muted projects are stored as SHA-256 identifiers rather than plain-text paths.
 - No OpenAI API key is required. GPT Pulse includes no task analytics or task-data upload service.
 
-An update check reads the public Sparkle appcast at:
-
-```text
-https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml
-```
-
-The check does not attach Codex task data or a generated system profile. If you accept an update, Sparkle then downloads the signed release asset referenced by that feed. Normal task monitoring remains local.
+An optional update check reads the public release information hosted on GitHub. It does not attach Codex task data or a generated system profile. Normal task monitoring remains local.
 
 ## Install
 
@@ -94,9 +103,9 @@ The check does not attach Codex task data or a generated system profile. If you 
 4. Launch GPT Pulse from `Applications`. Notification permission is optional; local task monitoring works without it.
 5. Enable launch at login in GPT Pulse settings if desired.
 
-## Update with Sparkle
+## In-app updates
 
-GPT Pulse v1.1.0 added Sparkle 2 for in-app updates. Right-click the menu bar item and choose `检查更新…` to check the public release feed. Sparkle verifies the signed update before installation.
+GPT Pulse v1.1.0 added in-app updates. Right-click the menu bar item and choose `检查更新…` to check the public GitHub Release feed and install a newer version.
 
 v1.1.0 is the bootstrap release for this update channel. Users on v1.0.0 must download and install v1.1.0 manually once; later releases can be installed from inside GPT Pulse.
 
@@ -123,9 +132,17 @@ The hooks depend only on `/bin/sh` and JXA included with macOS. They do not requ
 
 GPT Pulse is a native macOS menu bar monitor for local Codex Desktop tasks. It summarizes task state and usage in a right-edge sidebar so you do not need to keep every task window open.
 
+### How can I monitor multiple Codex Desktop tasks on macOS?
+
+Run GPT Pulse alongside Codex Desktop. Its menu bar status summarizes active and recently completed work, while the right-edge sidebar lists each local root task with its state, project, elapsed time, token usage, and active agent total.
+
 ### Does GPT Pulse modify or control Codex tasks?
 
 No. It reads Codex data and can open an existing task through a deep link, but it does not approve, answer, stop, retry, create, archive, or edit tasks.
+
+### Does GPT Pulse upload prompts or task data?
+
+No. Task monitoring stays on the Mac. GPT Pulse does not extract, retain, or upload prompts, tool input, tool output, or transcripts, and no OpenAI API key is required.
 
 ### Does it work without the Codex plugin?
 
@@ -139,17 +156,25 @@ Subagents do not appear as separate rows. GPT Pulse aggregates the active main a
 
 They are remaining percentages calculated from Codex’s reported used percentages, together with reset times. They are not absolute token balances. GPT Pulse keeps both windows from one complete snapshot rather than mixing values from different tasks.
 
+### How does GPT Pulse read Codex usage limits?
+
+It asks the bundled local Codex App Server for the same grouped 5-hour and weekly limits shown by Codex Desktop. Compatible local rollout data is used only as a fallback, and GPT Pulse never combines windows from unrelated snapshots.
+
+### Can GPT Pulse open a task directly in Codex Desktop?
+
+Yes. Clicking a row opens the matching task through a local `codex://threads/<thread-id>` link. If navigation fails, GPT Pulse keeps the task unread and reports the error instead of silently acknowledging it.
+
 ### Why is a viewed task still under recently completed?
 
 “Viewed” clears the unread state; it does not delete the history row. Completed, failed, and interrupted tasks remain in the recent list for up to 24 hours, subject to the 20-item cap.
 
 ### Can v1.0.0 update itself?
 
-No. Install v1.1.0 manually once to add the Sparkle update channel. From v1.1.0 onward, use the menu bar’s `检查更新…` command.
+No. Install v1.1.0 manually once to add the in-app update channel. From v1.1.0 onward, use the menu bar’s `检查更新…` command.
 
 ### Does GPT Pulse support Codex CLI, IDE tasks, cloud tasks, or other AI coding tools?
 
-Not in v1.1.0. The current scope is root tasks created by Codex Desktop on the local Mac.
+No. The current scope is root tasks created by Codex Desktop on the local Mac.
 
 ### Is GPT Pulse an official OpenAI product?
 
