@@ -357,6 +357,30 @@ validate_source_sparkle_configuration() {
   log "validated Sparkle feed, EdDSA public key, and privacy settings"
 }
 
+stage_requires_notarization() {
+  case "$STAGE" in
+    all|notarize-app|app-notarize|notarize-dmg|dmg-notarize) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_notary_profile() {
+  stage_requires_notarization || return
+
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] verify notarytool Keychain profile $NOTARY_PROFILE"
+    return
+  fi
+
+  if ! /usr/bin/xcrun notarytool history \
+      --keychain-profile "$NOTARY_PROFILE" \
+      --no-progress \
+      --output-format json >/dev/null 2>&1; then
+    die "notarytool Keychain profile is unavailable or invalid: $NOTARY_PROFILE"
+  fi
+  log "validated notarytool Keychain profile"
+}
+
 require_clean_worktree() {
   local status
   if is_true "$ALLOW_DIRTY"; then
@@ -1099,6 +1123,7 @@ preflight() {
   validate_source_sparkle_configuration
   require_clean_worktree
   resolve_git_head
+  validate_notary_profile
 }
 
 run_stage() {
