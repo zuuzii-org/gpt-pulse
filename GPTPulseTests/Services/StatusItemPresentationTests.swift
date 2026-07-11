@@ -75,6 +75,18 @@ final class StatusItemPresentationTests: XCTestCase {
         XCTAssertEqual(twoDigits.title, "12\n34")
     }
 
+    func testEnglishAccessibilityAndTooltipCopy() {
+        let snapshot = TaskSnapshot(
+            tasks: [makeTask(id: "running", state: .running)],
+            refreshedAt: .now,
+            health: []
+        )
+        let presentation = StatusItemPresentation(snapshot: snapshot, language: .english)
+
+        XCTAssertTrue(presentation.accessibilityLabel.contains("Running tasks: 1"))
+        XCTAssertTrue(presentation.toolTip.contains("1 running"))
+    }
+
     @MainActor
     func testMenuBarIconIsAn18PointTemplateImage() {
         let image = NSImage.statusMenuIcon

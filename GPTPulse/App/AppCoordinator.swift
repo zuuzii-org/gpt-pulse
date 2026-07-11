@@ -57,7 +57,8 @@ final class AppCoordinator {
             width: settings.panelWidth,
             dismissDelay: settings.panelDismissDelay,
             statusItemDisplayDuration: settings.statusItemPanelDisplayDuration,
-            rootView: sidebar
+            rootView: sidebar,
+            settings: settings
         )
 
         taskOpeningService = TaskOpeningService(
@@ -85,7 +86,7 @@ final class AppCoordinator {
             }
         )
 
-        statusItemController = StatusItemController(monitor: monitor)
+        statusItemController = StatusItemController(monitor: monitor, settings: settings)
         statusItemController.onTogglePanel = { [weak self] in self?.togglePanel() }
         statusItemController.onOpenAttentionTask = { [weak self] in self?.openAttentionTask() }
         statusItemController.onRefresh = { [weak monitor] in monitor?.refresh() }
@@ -197,7 +198,10 @@ final class AppCoordinator {
         let task = PulseTask(
             threadId: route.threadID,
             turnId: suffix == "thread" ? nil : suffix,
-            title: "通知中的已完成任务",
+            title: PulseL10n.text(
+                "通知中的已完成任务",
+                language: settings.appLanguage
+            ),
             projectDirectory: "",
             state: .completed,
             startedAt: .now,

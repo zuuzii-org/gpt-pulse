@@ -19,7 +19,7 @@
 
 **GPT Pulse is an open-source native macOS menu bar task monitor for Codex Desktop.** It keeps running tasks, work waiting for approval or input, recent completions, active agent totals, token usage, and usage-limit reset times visible in one right-edge sidebar. GPT Pulse reads local Codex data and never changes Codex task records.
 
-The app interface is currently in Simplified Chinese. This documentation is available in English and Simplified Chinese.
+The app interface supports English and Simplified Chinese. Choose Follow System, 简体中文, or English in Settings; changes apply immediately without restarting.
 
 <p align="center">
   <img src="Assets/Release/product-sidebar.png" width="400" alt="GPT Pulse sidebar showing running Codex tasks, approval requests, active agents, recent completions, token usage, and usage-limit reset times">
@@ -41,17 +41,17 @@ The app interface is currently in Simplified Chinese. This documentation is avai
 
 ## Download
 
-[Download the latest signed and notarized DMG](https://github.com/zuuzii-org/gpt-pulse/releases/latest). GPT Pulse v1.2.0 requires macOS 14 or later and ships as a Universal App for Apple Silicon and Intel Macs.
+[Download the latest signed and notarized DMG](https://github.com/zuuzii-org/gpt-pulse/releases/latest). GPT Pulse v1.3.0 requires macOS 14 or later and ships as a Universal App for Apple Silicon and Intel Macs.
 
 Release assets include:
 
-- `GPT-Pulse-1.2.0.dmg`
-- `GPT-Pulse-1.2.0.dmg.sha256`
+- `GPT-Pulse-1.3.0.dmg`
+- `GPT-Pulse-1.3.0.dmg.sha256`
 
 To verify the download, place both files in the same folder and run:
 
 ```bash
-shasum -a 256 -c GPT-Pulse-1.2.0.dmg.sha256
+shasum -a 256 -c GPT-Pulse-1.3.0.dmg.sha256
 ```
 
 If you are using v1.0.0, install v1.1.0 manually once. v1.0.0 did not include in-app updates, so it cannot discover the update channel. From v1.1.0 onward, right-click the menu bar item and choose `检查更新…` (“Check for Updates…”) to update in place.
@@ -67,7 +67,7 @@ If you are using v1.0.0, install v1.1.0 manually once. v1.0.0 did not include in
 - **Codex usage limits.** The sidebar shows the remaining percentage, reset time, and freshness for the 5-hour and weekly windows.
 - **Native notifications.** Choose attention-only, important, or all recognizable states. Notifications support task actions, 15-minute or 1-hour snooze, quiet completion summaries, and usage-limit warnings.
 - **Project controls.** Focus the panel on one Git project or mute that project’s notifications for an hour or until the next day. Menu bar totals remain global.
-- **macOS behavior.** Launch at login, multiple displays, reduced-motion support, and configurable edge triggering in full-screen apps are built in.
+- **macOS behavior.** Launch at login, multiple displays, reduced-motion support, configurable edge triggering in full-screen apps, and an instant English/Simplified Chinese language switch are built in.
 
 Recently completed tasks remain available for 24 hours, up to 20 items. Unviewed successful tasks receive retention priority, and a batch acknowledgement can be undone for six seconds.
 
@@ -114,7 +114,7 @@ v1.1.0 is the bootstrap release for this update channel. Users on v1.0.0 must do
 The app works without the plugin by falling back to read-only SQLite and rollout JSONL. Installing the bundled lifecycle hooks improves the timeliness of running and approval-waiting states.
 
 ```bash
-codex plugin marketplace add zuuzii-org/gpt-pulse --ref v1.2.0
+codex plugin marketplace add zuuzii-org/gpt-pulse --ref v1.3.0
 codex plugin add gpt-pulse@gpt-pulse
 ```
 
@@ -187,7 +187,7 @@ No. GPT Pulse is an independent open-source project by Zuuzii and is not affilia
 - Opening a task directly inside Codex Desktop cannot be detected reliably. Open it from GPT Pulse or acknowledge it manually to clear its unread state.
 - Codex hooks have no separate approval-resolved event. A task may remain in the approval-waiting state until the related tool emits `PostToolUse`.
 - Usage-limit sources provide percentages and reset times, not a reliable absolute token allowance.
-- The current app interface is Simplified Chinese; only the project documentation is bilingual.
+- App-generated interface text supports English and Simplified Chinese. User task titles, project paths, and raw Codex content remain unchanged.
 
 ## Build from source
 

@@ -1,9 +1,11 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var hasPresented = false
+    private var languageCancellable: AnyCancellable?
 
     init(
         settings: PulseSettings,
@@ -18,15 +20,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.title = "GPT Pulse 设置"
-        window.setContentSize(NSSize(width: 580, height: 540))
-        window.contentMinSize = NSSize(width: 540, height: 500)
+        window.title = PulseL10n.text("GPT Pulse 设置", language: settings.appLanguage)
+        window.setContentSize(NSSize(width: 580, height: 600))
+        window.contentMinSize = NSSize(width: 540, height: 560)
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
         window.setFrameAutosaveName("GPTPulse.SettingsWindow")
 
         super.init(window: window)
         window.delegate = self
+        languageCancellable = settings.$appLanguage
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak window] language in
+                window?.title = PulseL10n.text("GPT Pulse 设置", language: language)
+            }
     }
 
     @available(*, unavailable)

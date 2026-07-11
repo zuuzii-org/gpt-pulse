@@ -14,13 +14,38 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("语言") {
+                Picker("应用语言", selection: $settings.appLanguage) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.displayName(in: settings.appLanguage)).tag(language)
+                    }
+                }
+
+                Text("切换后立即应用，无需重新启动。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("触边") {
                 Toggle("启用右侧边缘触发", isOn: $settings.edgeTriggerEnabled)
                 Toggle("全屏应用和游戏中禁用", isOn: $settings.disableInFullScreen)
 
-                LabeledContent("触发区域", value: "鼠标所在屏幕右侧中间 60%")
+                LabeledContent(
+                    "触发区域",
+                    value: PulseL10n.text(
+                        "鼠标所在屏幕右侧中间 60%",
+                        language: settings.appLanguage
+                    )
+                )
                 LabeledContent("停留时间", value: "200 ms")
-                LabeledContent("侧边栏", value: "\(Int(settings.panelWidth)) px · 全高")
+                LabeledContent(
+                    "侧边栏",
+                    value: PulseL10n.text(
+                        "%d px · 全高",
+                        language: settings.appLanguage,
+                        Int(settings.panelWidth)
+                    )
+                )
             }
 
             Section("通知") {
@@ -47,12 +72,12 @@ struct SettingsView: View {
 
                 Picker("提醒范围", selection: $settings.notificationAttentionLevel) {
                     ForEach(NotificationAttentionLevel.allCases) { level in
-                        Text(level.title).tag(level)
+                        Text(level.title(language: settings.appLanguage)).tag(level)
                     }
                 }
                 .disabled(!settings.notificationsEnabled)
 
-                Text(settings.notificationAttentionLevel.detail)
+                Text(settings.notificationAttentionLevel.detail(language: settings.appLanguage))
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -63,7 +88,11 @@ struct SettingsView: View {
                     HStack {
                         LabeledContent(
                             "临时静音项目",
-                            value: "\(settings.mutedProjectExpirations.count) 个"
+                            value: PulseL10n.text(
+                                "%d 个",
+                                language: settings.appLanguage,
+                                settings.mutedProjectExpirations.count
+                            )
                         )
                         Button("全部取消静音") {
                             settings.clearProjectMutes()
@@ -100,8 +129,13 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(minWidth: 540, idealWidth: 580, minHeight: 500, idealHeight: 540)
-        .navigationTitle("GPT Pulse 设置")
+        .frame(minWidth: 540, idealWidth: 580, minHeight: 560, idealHeight: 600)
+        .navigationTitle(PulseL10n.text(
+            "GPT Pulse 设置",
+            language: settings.appLanguage
+        ))
+        .environment(\.locale, settings.appLanguage.locale)
+        .environment(\.pulseLanguage, settings.appLanguage)
         .onAppear {
             launchAtLogin.refresh()
         }

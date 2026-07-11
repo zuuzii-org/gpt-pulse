@@ -32,8 +32,9 @@ struct StatusItemPresentation: Equatable {
     let waitingActionCount: Int
     let hasWaitingAction: Bool
     let hasFailures: Bool
+    let language: AppLanguage
 
-    init(snapshot: TaskSnapshot) {
+    init(snapshot: TaskSnapshot, language: AppLanguage = .simplifiedChinese) {
         activeCount = snapshot.activeCount
         recentCompletedCount = snapshot.recentCompletedCount
         waitingActionCount = snapshot.tasks.lazy.filter {
@@ -41,6 +42,7 @@ struct StatusItemPresentation: Equatable {
         }.count
         hasWaitingAction = waitingActionCount > 0
         hasFailures = snapshot.hasFailures
+        self.language = language
     }
 
     var indicatorState: StatusItemIndicatorState {
@@ -63,28 +65,39 @@ struct StatusItemPresentation: Equatable {
 
     var accessibilityLabel: String {
         var components = [
-            "正在运行 \(activeCount) 个任务",
-            "最近完成 \(recentCompletedCount) 个任务",
+            PulseL10n.text("正在运行 %d 个任务", language: language, activeCount),
+            PulseL10n.text("最近完成 %d 个任务", language: language, recentCompletedCount),
         ]
         if hasWaitingAction {
-            components.append("需要你处理 \(waitingActionCount) 个任务")
+            components.append(PulseL10n.text(
+                "需要你处理 %d 个任务",
+                language: language,
+                waitingActionCount
+            ))
         }
         if hasFailures {
-            components.append("存在失败")
+            components.append(PulseL10n.text("存在失败", language: language))
         }
-        return "GPT Pulse，" + components.joined(separator: "，")
+        if language.usesChinesePunctuation {
+            return "GPT Pulse，" + components.joined(separator: "，")
+        }
+        return "GPT Pulse · " + components.joined(separator: " · ")
     }
 
     var toolTip: String {
         var components = [
-            "正在运行 \(activeCount)",
-            "最近完成 \(recentCompletedCount)",
+            PulseL10n.text("正在运行 %d", language: language, activeCount),
+            PulseL10n.text("最近完成 %d", language: language, recentCompletedCount),
         ]
         if hasWaitingAction {
-            components.append("需要你处理 \(waitingActionCount)")
+            components.append(PulseL10n.text(
+                "需要你处理 %d",
+                language: language,
+                waitingActionCount
+            ))
         }
         if hasFailures {
-            components.append("存在失败")
+            components.append(PulseL10n.text("存在失败", language: language))
         }
         return "GPT Pulse · " + components.joined(separator: " · ")
     }
@@ -109,14 +122,18 @@ final class StatusItemController: NSObject {
     var button: NSStatusBarButton? { statusItem.button }
 
     private let statusItem: NSStatusItem
+    private let settings: PulseSettings?
     private let menuPresenter: (NSMenu, NSStatusBarButton) -> Void
     private let menu = NSMenu()
     private let statusContentView = StatusItemContentView()
     private var attentionMenuItem: NSMenuItem?
     private var snapshotCancellable: AnyCancellable?
+    private var languageCancellable: AnyCancellable?
+    private var latestSnapshot: TaskSnapshot
 
     init(
         monitor: TaskMonitor,
+        settings: PulseSettings? = nil,
         menuPresenter: @escaping (NSMenu, NSStatusBarButton) -> Void = { menu, button in
             menu.popUp(
                 positioning: nil,
@@ -126,6 +143,8 @@ final class StatusItemController: NSObject {
         }
     ) {
         statusItem = NSStatusBar.system.statusItem(withLength: Self.statusItemWidth)
+        self.settings = settings
+        latestSnapshot = monitor.snapshot
         self.menuPresenter = menuPresenter
         super.init()
 
@@ -137,6 +156,17 @@ final class StatusItemController: NSObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] snapshot in
                 self?.update(snapshot: snapshot)
+            }
+
+        languageCancellable = settings?.$appLanguage
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.applyButtonLocalization()
+                self?.configureMenu()
+                if let snapshot = self?.latestSnapshot {
+                    self?.update(snapshot: snapshot)
+                }
             }
     }
 
@@ -159,12 +189,19 @@ final class StatusItemController: NSObject {
         statusContentView.autoresizingMask = [.width, .height]
         button.addSubview(statusContentView)
         button.setAccessibilityRole(.button)
-        button.setAccessibilityHelp(
-            "左键显示或隐藏任务面板；右键或“打开更多选项”操作显示菜单。"
-        )
+        applyButtonLocalization()
+    }
+
+    private func applyButtonLocalization() {
+        guard let button = statusItem.button else { return }
+        let language = settings?.appLanguage ?? .system
+        button.setAccessibilityHelp(PulseL10n.text(
+            "左键显示或隐藏任务面板；右键或“打开更多选项”操作显示菜单。",
+            language: language
+        ))
         button.setAccessibilityCustomActions([
             NSAccessibilityCustomAction(
-                name: "打开更多选项",
+                name: PulseL10n.text("打开更多选项", language: language),
                 target: self,
                 selector: #selector(openMenuFromAccessibility)
             ),
@@ -172,8 +209,10 @@ final class StatusItemController: NSObject {
     }
 
     private func configureMenu() {
+        menu.removeAllItems()
+        let language = settings?.appLanguage ?? .system
         let attentionItem = NSMenuItem(
-            title: "打开下一条需处理任务",
+            title: PulseL10n.text("打开下一条需处理任务", language: language),
             action: #selector(openAttentionTask),
             keyEquivalent: ""
         )
@@ -183,7 +222,7 @@ final class StatusItemController: NSObject {
         attentionMenuItem = attentionItem
 
         let openItem = NSMenuItem(
-            title: "打开任务面板",
+            title: PulseL10n.text("打开任务面板", language: language),
             action: #selector(openPanel),
             keyEquivalent: ""
         )
@@ -191,7 +230,7 @@ final class StatusItemController: NSObject {
         menu.addItem(openItem)
 
         let refreshItem = NSMenuItem(
-            title: "立即刷新",
+            title: PulseL10n.text("立即刷新", language: language),
             action: #selector(refresh),
             keyEquivalent: "r"
         )
@@ -201,7 +240,7 @@ final class StatusItemController: NSObject {
         menu.addItem(.separator())
 
         let checkForUpdatesItem = NSMenuItem(
-            title: "检查更新…",
+            title: PulseL10n.text("检查更新…", language: language),
             action: #selector(checkForUpdates),
             keyEquivalent: ""
         )
@@ -209,7 +248,7 @@ final class StatusItemController: NSObject {
         menu.addItem(checkForUpdatesItem)
 
         let settingsItem = NSMenuItem(
-            title: "设置…",
+            title: PulseL10n.text("设置…", language: language),
             action: #selector(openSettings),
             keyEquivalent: ","
         )
@@ -219,7 +258,7 @@ final class StatusItemController: NSObject {
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
-            title: "退出 GPT Pulse",
+            title: PulseL10n.text("退出 GPT Pulse", language: language),
             action: #selector(quit),
             keyEquivalent: "q"
         )
@@ -229,8 +268,12 @@ final class StatusItemController: NSObject {
 
     private func update(snapshot: TaskSnapshot) {
         guard let button = statusItem.button else { return }
+        latestSnapshot = snapshot
 
-        let presentation = StatusItemPresentation(snapshot: snapshot)
+        let presentation = StatusItemPresentation(
+            snapshot: snapshot,
+            language: settings?.appLanguage ?? .system
+        )
         statusContentView.update(
             presentation: presentation,
             activeColor: indicatorColor(for: presentation.indicatorState)

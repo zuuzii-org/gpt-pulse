@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import QuartzCore
 import SwiftUI
 
@@ -143,6 +144,7 @@ struct TaskPanelAutomaticDismissState: Equatable, Sendable {
 final class TaskPanelController: NSObject, NSWindowDelegate {
     private let panel: PulsePanel
     private let width: CGFloat
+    private var languageCancellable: AnyCancellable?
 
     private var localEventMonitor: Any?
     private var globalEventMonitor: Any?
@@ -158,7 +160,8 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
         width: CGFloat,
         dismissDelay: TimeInterval,
         statusItemDisplayDuration: TimeInterval,
-        rootView: Content
+        rootView: Content,
+        settings: PulseSettings? = nil
     ) {
         self.width = width
         automaticDismissState = TaskPanelAutomaticDismissState(
@@ -187,7 +190,20 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
         panel.animationBehavior = .none
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.title = "GPT Pulse"
-        panel.setAccessibilityLabel("GPT Pulse 任务侧边栏")
+        updateLocalization(language: settings?.appLanguage ?? .system)
+        languageCancellable = settings?.$appLanguage
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] language in
+                self?.updateLocalization(language: language)
+            }
+    }
+
+    private func updateLocalization(language: AppLanguage) {
+        panel.setAccessibilityLabel(PulseL10n.text(
+            "GPT Pulse 任务侧边栏",
+            language: language
+        ))
     }
 
     func setOutsideDismissExcludedView(_ view: NSView?) {

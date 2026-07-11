@@ -8,25 +8,25 @@ enum NotificationAttentionLevel: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    func title(language: AppLanguage) -> String {
         switch self {
         case .attentionOnly:
-            return "仅需我处理"
+            return PulseL10n.text("仅需我处理", language: language)
         case .important:
-            return "重要状态"
+            return PulseL10n.text("重要状态", language: language)
         case .all:
-            return "全部"
+            return PulseL10n.text("全部", language: language)
         }
     }
 
-    var detail: String {
+    func detail(language: AppLanguage) -> String {
         switch self {
         case .attentionOnly:
-            return "等待授权、等待回答和失败时提醒"
+            return PulseL10n.text("等待授权、等待回答和失败时提醒", language: language)
         case .important:
-            return "再包含完成通知；同批完成会合并"
+            return PulseL10n.text("再包含完成通知；同批完成会合并", language: language)
         case .all:
-            return "包含中断在内的所有可识别状态"
+            return PulseL10n.text("包含中断在内的所有可识别状态", language: language)
         }
     }
 }
@@ -37,6 +37,7 @@ enum PulsePreferenceKey {
     static let notificationsEnabled = "notificationsEnabled"
     static let notificationSoundEnabled = "notificationSoundEnabled"
     static let notificationAttentionLevel = "notificationAttentionLevel"
+    static let appLanguage = "appLanguage"
     static let mutedProjectExpirations = "mutedProjectExpirations"
     static let runningSectionExpanded = "runningSectionExpanded"
     static let recentSectionExpanded = "recentSectionExpanded"
@@ -44,6 +45,10 @@ enum PulsePreferenceKey {
 
 @MainActor
 final class PulseSettings: ObservableObject {
+    @Published var appLanguage: AppLanguage {
+        didSet { defaults.set(appLanguage.rawValue, forKey: PulsePreferenceKey.appLanguage) }
+    }
+
     @Published var edgeTriggerEnabled: Bool {
         didSet { defaults.set(edgeTriggerEnabled, forKey: PulsePreferenceKey.edgeTriggerEnabled) }
     }
@@ -98,6 +103,8 @@ final class PulseSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        appLanguage = defaults.string(forKey: PulsePreferenceKey.appLanguage)
+            .flatMap(AppLanguage.init(rawValue:)) ?? .system
         edgeTriggerEnabled = defaults.value(
             forKey: PulsePreferenceKey.edgeTriggerEnabled,
             default: true

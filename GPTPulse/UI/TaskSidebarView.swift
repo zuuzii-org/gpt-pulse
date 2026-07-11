@@ -82,11 +82,11 @@ struct TaskSidebarView: View {
 
         let nameCounts = Dictionary(
             grouping: taskByDirectory.values,
-            by: \.projectDisplayName
+            by: { $0.projectDisplayName(language: settings.appLanguage) }
         ).mapValues(\.count)
 
         return taskByDirectory.values.map { task in
-            let displayName = task.projectDisplayName
+            let displayName = task.projectDisplayName(language: settings.appLanguage)
             let identity = task.projectIdentityDirectory
             let parentName = URL(fileURLWithPath: identity)
                 .deletingLastPathComponent()
@@ -208,6 +208,8 @@ struct TaskSidebarView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .environment(\.locale, settings.appLanguage.locale)
+        .environment(\.pulseLanguage, settings.appLanguage)
         .onAppear(perform: focusFirstTask)
         .onChange(of: snapshot.tasks) { _, _ in
             preserveValidFocusAndExpansion()
@@ -277,7 +279,11 @@ struct TaskSidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .help("处理下一条等待授权或回答的任务")
-                .accessibilityLabel("需要你处理 \(attentionTasks.count) 个任务，打开下一条")
+                .accessibilityLabel(PulseL10n.text(
+                    "需要你处理 %d 个任务，打开下一条",
+                    language: settings.appLanguage,
+                    attentionTasks.count
+                ))
             }
 
             if !projectOptions.isEmpty {
@@ -346,10 +352,20 @@ struct TaskSidebarView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help(selectedProject == nil ? "按项目筛选" : "当前仅显示 \(selectedProject?.menuTitle ?? "")")
+        .help(selectedProject == nil
+            ? PulseL10n.text("按项目筛选", language: settings.appLanguage)
+            : PulseL10n.text(
+                "当前仅显示 %@",
+                language: settings.appLanguage,
+                selectedProject?.menuTitle ?? ""
+            ))
         .accessibilityLabel(selectedProject == nil
-            ? "按项目筛选，当前显示全部项目"
-            : "按项目筛选，当前仅显示 \(selectedProject?.menuTitle ?? "")")
+            ? PulseL10n.text("按项目筛选，当前显示全部项目", language: settings.appLanguage)
+            : PulseL10n.text(
+                "按项目筛选，当前仅显示 %@",
+                language: settings.appLanguage,
+                selectedProject?.menuTitle ?? ""
+            ))
     }
 
     private func openErrorBanner(_ message: String) -> some View {
@@ -550,7 +566,11 @@ struct TaskSidebarView: View {
                 .foregroundStyle(.green)
                 .accessibilityHidden(true)
 
-            Text("已将 \(batch.tasks.count) 个任务标记为已查看")
+            Text(PulseL10n.text(
+                "已将 %d 个任务标记为已查看",
+                language: settings.appLanguage,
+                batch.tasks.count
+            ))
                 .font(.caption.weight(.medium))
 
             Spacer(minLength: 8)
@@ -580,12 +600,24 @@ struct TaskSidebarView: View {
     }
 
     private var statusSummary: String {
-        "\(snapshot.activeCount) 个运行中 · \(snapshot.recentCompletedCount) 个最近完成"
+        PulseL10n.text(
+            "%d 个运行中 · %d 个最近完成",
+            language: settings.appLanguage,
+            snapshot.activeCount,
+            snapshot.recentCompletedCount
+        )
     }
 
     private var healthSummary: String {
-        let messages = (unavailableHealth + degradedHealth).map(\.displayMessage)
-        return messages.isEmpty ? "Codex 数据源没有响应，请稍后重试。" : messages.joined(separator: "；")
+        let messages = (unavailableHealth + degradedHealth).map {
+            $0.displayMessage(language: settings.appLanguage)
+        }
+        return messages.isEmpty
+            ? PulseL10n.text(
+                "Codex 数据源没有响应，请稍后重试。",
+                language: settings.appLanguage
+            )
+            : messages.joined(separator: " · ")
     }
 
     private var footerHealthColor: Color {
@@ -597,17 +629,22 @@ struct TaskSidebarView: View {
     private var footerStatusText: String {
         let healthText: String
         if !unavailableHealth.isEmpty {
-            healthText = "数据异常"
+            healthText = PulseL10n.text("数据异常", language: settings.appLanguage)
         } else if !degradedHealth.isEmpty {
-            healthText = "数据降级"
+            healthText = PulseL10n.text("数据降级", language: settings.appLanguage)
         } else {
-            healthText = "数据健康"
+            healthText = PulseL10n.text("数据健康", language: settings.appLanguage)
         }
 
         guard snapshot.refreshedAt != .distantPast else {
-            return healthText + " · 待刷新"
+            return healthText + " · "
+                + PulseL10n.text("待刷新", language: settings.appLanguage)
         }
-        return healthText + " · 更新于 " + snapshot.refreshedAt.pulseRelativeDescription()
+        return healthText + " · " + PulseL10n.text(
+            "更新于 %@",
+            language: settings.appLanguage,
+            snapshot.refreshedAt.pulseRelativeDescription(language: settings.appLanguage)
+        )
     }
 
     private func runningTaskSort(_ lhs: PulseTask, _ rhs: PulseTask) -> Bool {
@@ -710,7 +747,14 @@ struct TaskSidebarView: View {
         let parentName = URL(fileURLWithPath: identity)
             .deletingLastPathComponent()
             .lastPathComponent
-        return parentName.isEmpty ? displayName : "\(displayName)，位于 \(parentName)"
+        return parentName.isEmpty
+            ? displayName
+            : PulseL10n.text(
+                "%@，位于 %@",
+                language: settings.appLanguage,
+                displayName,
+                parentName
+            )
     }
 
     private func isProjectMuted(_ task: PulseTask) -> Bool {
@@ -742,7 +786,10 @@ struct TaskSidebarView: View {
             let succeeded = await onMarkAllViewed(tasks)
             receiptMutationInFlight = false
             guard succeeded else {
-                openErrorMessage = "批量标记失败，未查看状态没有改变。请稍后重试。"
+                openErrorMessage = PulseL10n.text(
+                    "批量标记失败，未查看状态没有改变。请稍后重试。",
+                    language: settings.appLanguage
+                )
                 return
             }
 
@@ -770,7 +817,10 @@ struct TaskSidebarView: View {
             if succeeded {
                 dismissUndoBatch(batch.id)
             } else {
-                openErrorMessage = "撤销失败，任务仍保持已查看。请稍后重试。"
+                openErrorMessage = PulseL10n.text(
+                    "撤销失败，任务仍保持已查看。请稍后重试。",
+                    language: settings.appLanguage
+                )
                 undoAccessibilityFocused = true
             }
         }
@@ -806,7 +856,11 @@ struct TaskSidebarView: View {
         if onOpenTask(task) {
             openErrorMessage = nil
         } else {
-            openErrorMessage = "无法在 Codex 中打开“\(task.title)”。请确认 Codex 桌面版已安装并可用。"
+            openErrorMessage = PulseL10n.text(
+                "无法在 Codex 中打开“%@”。请确认 Codex 桌面版已安装并可用。",
+                language: settings.appLanguage,
+                task.title
+            )
         }
     }
 }
@@ -917,14 +971,19 @@ private struct ProjectScopeBar: View {
 }
 
 private struct RateLimitCard: View {
+    @Environment(\.pulseLanguage) private var language
+
     let rateLimits: RateLimitSnapshot?
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(spacing: 0) {
                 QuotaWindowRow(
-                    title: "5h 余额",
-                    helpText: "最近 5 小时额度的剩余比例",
+                    title: PulseL10n.text("5h 余额", language: language),
+                    helpText: PulseL10n.text(
+                        "最近 5 小时额度的剩余比例",
+                        language: language
+                    ),
                     window: rateLimits?.fiveHour,
                     asOf: context.date
                 )
@@ -936,8 +995,8 @@ private struct RateLimitCard: View {
                     .padding(.horizontal, 14)
 
                 QuotaWindowRow(
-                    title: "本周余额",
-                    helpText: "本周额度的剩余比例",
+                    title: PulseL10n.text("本周余额", language: language),
+                    helpText: PulseL10n.text("本周额度的剩余比例", language: language),
                     window: rateLimits?.weekly,
                     asOf: context.date
                 )
@@ -963,16 +1022,27 @@ private struct RateLimitCard: View {
     }
 
     private func freshnessText(asOf date: Date) -> String {
-        guard let rateLimits else { return "额度待刷新" }
+        guard let rateLimits else {
+            return PulseL10n.text("额度待刷新", language: language)
+        }
         let hasCurrentWindow = [rateLimits.fiveHour, rateLimits.weekly]
             .compactMap { $0 }
             .contains { $0.remainingPercent(asOf: date) != nil }
-        guard hasCurrentWindow else { return "额度待刷新" }
-        return "更新于 " + rateLimits.updatedAt.pulseRelativeDescription(asOf: date)
+        guard hasCurrentWindow else {
+            return PulseL10n.text("额度待刷新", language: language)
+        }
+        return PulseL10n.text(
+            "更新于 %@",
+            language: language,
+            rateLimits.updatedAt.pulseRelativeDescription(asOf: date, language: language)
+        )
     }
 }
 
 private struct QuotaWindowRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.pulseLanguage) private var language
+
     let title: String
     let helpText: String
     let window: RateLimitWindowSnapshot?
@@ -999,22 +1069,35 @@ private struct QuotaWindowRow: View {
 
             Group {
                 if let remainingPercent {
-                    ProgressView(value: remainingPercent, total: 100)
-                        .tint(Color.accentColor)
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.primary.opacity(0.13))
+
+                            Capsule()
+                                .fill(quotaAccent)
+                                .frame(
+                                    width: proxy.size.width
+                                        * min(max(remainingPercent / 100, 0), 1)
+                                )
+                                .shadow(color: quotaAccent.opacity(0.28), radius: 1)
+                        }
+                    }
+                    .frame(height: 6)
                 } else {
                     ProgressView()
                         .tint(Color.secondary)
                         .opacity(0.7)
+                        .progressViewStyle(.linear)
                 }
             }
-                .progressViewStyle(.linear)
-                .accessibilityLabel(title)
-                .accessibilityValue(balanceText)
+            .accessibilityLabel(title)
+            .accessibilityValue(balanceText)
 
             Text(balanceText)
-                .font(.caption.weight(.semibold))
+                .font(.caption.weight(.bold))
                 .monospacedDigit()
-                .foregroundStyle(remainingPercent == nil ? Color.secondary : Color.accentColor)
+                .foregroundStyle(remainingPercent == nil ? Color.secondary : quotaAccent)
                 .frame(width: 66, alignment: .trailing)
 
             Text(resetText)
@@ -1029,14 +1112,29 @@ private struct QuotaWindowRow: View {
         .accessibilityElement(children: .combine)
     }
 
+    private var quotaAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 0.28, green: 0.68, blue: 1.0)
+            : Color(red: 0.0, green: 0.36, blue: 0.78)
+    }
+
     private var balanceText: String {
-        guard let remainingPercent else { return "待刷新" }
-        return "\(Int(remainingPercent.rounded()))% 剩余"
+        guard let remainingPercent else {
+            return PulseL10n.text("待刷新", language: language)
+        }
+        return PulseL10n.text(
+            "%d%% 剩余",
+            language: language,
+            Int(remainingPercent.rounded())
+        )
     }
 
     private var resetText: String {
         guard remainingPercent != nil, let window else { return "—" }
-        return window.resetsAt.pulseQuotaResetDescription(asOf: asOf)
+        return window.resetsAt.pulseQuotaResetDescription(
+            asOf: asOf,
+            language: language
+        )
     }
 }
 
@@ -1050,6 +1148,8 @@ enum TaskStatusSourceAvailability {
 }
 
 private struct TaskGroupSection: View {
+    @Environment(\.pulseLanguage) private var language
+
     let descriptor: TaskGroupDescriptor
     let tasks: [PulseTask]
     @Binding var isExpanded: Bool
@@ -1081,7 +1181,7 @@ private struct TaskGroupSection: View {
                             .frame(width: 8, height: 8)
                             .accessibilityHidden(true)
 
-                        Text(descriptor.title)
+                        Text(PulseL10n.text(descriptor.title, language: language))
                             .font(.caption.weight(.semibold))
 
                         Text("\(tasks.count)")
@@ -1120,7 +1220,7 @@ private struct TaskGroupSection: View {
             if isExpanded {
                 VStack(spacing: 0) {
                     if tasks.isEmpty {
-                        Text(descriptor.emptyMessage)
+                        Text(PulseL10n.text(descriptor.emptyMessage, language: language))
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1177,6 +1277,8 @@ private struct TaskGroupSection: View {
 }
 
 private struct TaskListItem: View {
+    @Environment(\.pulseLanguage) private var language
+
     let task: PulseTask
     let isExpanded: Bool
     let focusedTaskID: FocusState<String?>.Binding
@@ -1211,8 +1313,12 @@ private struct TaskListItem: View {
                 .frame(maxWidth: .infinity)
                 .focused(focusedTaskID, equals: task.id)
                 .accessibilityLabel(
-                    task.accessibilityLabel(projectName: projectAccessibilityName)
-                        + (isProjectMuted ? "，此项目通知已静音" : "")
+                    task.accessibilityLabel(
+                        projectName: projectAccessibilityName,
+                        language: language
+                    ) + (isProjectMuted
+                        ? PulseL10n.text("，此项目通知已静音", language: language)
+                        : "")
                 )
                 .accessibilityHint("打开 Codex 并定位到此任务")
 
@@ -1241,7 +1347,11 @@ private struct TaskListItem: View {
                     .foregroundStyle(.secondary)
                     .padding(.trailing, 4)
                     .help("标记为已查看")
-                    .accessibilityLabel("将 \(task.title) 标记为已查看")
+                    .accessibilityLabel(PulseL10n.text(
+                        "将 %@ 标记为已查看",
+                        language: language,
+                        task.title
+                    ))
                 }
             }
 
@@ -1310,6 +1420,8 @@ private struct TaskListItem: View {
 }
 
 private struct TaskRowSummary: View {
+    @Environment(\.pulseLanguage) private var language
+
     let task: PulseTask
     let isProjectMuted: Bool
 
@@ -1326,7 +1438,7 @@ private struct TaskRowSummary: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(task.projectDisplayName)
+                    Text(task.projectDisplayName(language: language))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(task.state.tintColor)
                         .lineLimit(1)
@@ -1354,12 +1466,15 @@ private struct TaskRowSummary: View {
                             .frame(width: 5, height: 5)
                             .accessibilityHidden(true)
 
-                        Text(task.rowStatusText)
+                        Text(task.rowStatusText(language: language))
                             .foregroundStyle(task.state.tintColor)
 
                         Text("·")
 
-                        Text(task.activityDate.pulseRelativeDescription(asOf: context.date))
+                        Text(task.activityDate.pulseRelativeDescription(
+                            asOf: context.date,
+                            language: language
+                        ))
                             .lineLimit(1)
                     }
                 }
@@ -1423,6 +1538,8 @@ private struct TaskMetricRail: View {
 }
 
 private struct TokenBreakdownView: View {
+    @Environment(\.pulseLanguage) private var language
+
     let tokenUsage: TokenUsageSnapshot
 
     private var items: [TokenBreakdownItem] {
@@ -1455,7 +1572,7 @@ private struct TokenBreakdownView: View {
             ForEach(items.indices, id: \.self) { index in
                 let item = items[index]
                 VStack(spacing: 3) {
-                    Text(item.title)
+                    Text(PulseL10n.text(item.title, language: language))
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
 
@@ -1463,7 +1580,9 @@ private struct TokenBreakdownView: View {
                         .font(.callout.weight(.medium))
                         .monospacedDigit()
 
-                    Text(item.subsetLabel ?? " ")
+                    Text(item.subsetLabel.map {
+                        PulseL10n.text($0, language: language)
+                    } ?? " ")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)
                 }
@@ -1488,10 +1607,14 @@ private struct TokenBreakdownView: View {
     }
 
     private var accessibilityLabel: String {
-        "Token 明细，输入 \(TokenUsageSnapshot.compactTokenCount(tokenUsage.inputTokens))，"
-            + "缓存命中 \(TokenUsageSnapshot.compactTokenCount(tokenUsage.cachedInputTokens))，缓存命中属于输入子集，"
-            + "输出 \(TokenUsageSnapshot.compactTokenCount(tokenUsage.outputTokens))，"
-            + "推理 \(TokenUsageSnapshot.compactTokenCount(tokenUsage.reasoningOutputTokens))，推理属于输出子集"
+        PulseL10n.text(
+            "Token 明细，输入 %@，缓存命中 %@，缓存命中属于输入子集，输出 %@，推理 %@，推理属于输出子集",
+            language: language,
+            TokenUsageSnapshot.compactTokenCount(tokenUsage.inputTokens),
+            TokenUsageSnapshot.compactTokenCount(tokenUsage.cachedInputTokens),
+            TokenUsageSnapshot.compactTokenCount(tokenUsage.outputTokens),
+            TokenUsageSnapshot.compactTokenCount(tokenUsage.reasoningOutputTokens)
+        )
     }
 }
 
@@ -1566,20 +1689,20 @@ private extension PulseTaskState {
         }
     }
 
-    var accessibilityDescription: String {
+    func accessibilityDescription(language: AppLanguage) -> String {
         switch self {
         case .running:
-            return "正在执行"
+            return PulseL10n.text("正在执行", language: language)
         case .waitingForApproval:
-            return "等待授权"
+            return PulseL10n.text("等待授权", language: language)
         case .waitingForAnswer:
-            return "等待回答"
+            return PulseL10n.text("等待回答", language: language)
         case .completed:
-            return "已完成"
+            return PulseL10n.text("已完成", language: language)
         case .failed:
-            return "失败"
+            return PulseL10n.text("失败", language: language)
         case .interrupted:
-            return "已中断"
+            return PulseL10n.text("已中断", language: language)
         }
     }
 }
@@ -1589,34 +1712,42 @@ private extension PulseTask {
         completedAt ?? updatedAt
     }
 
-    var rowStatusText: String {
-        displayStatusText.isEmpty ? state.accessibilityDescription : displayStatusText
+    func rowStatusText(language: AppLanguage) -> String {
+        let localizedStatus = displayStatusText(language: language)
+        return localizedStatus.isEmpty
+            ? state.accessibilityDescription(language: language)
+            : localizedStatus
     }
 
-    func accessibilityLabel(projectName: String) -> String {
+    func accessibilityLabel(projectName: String, language: AppLanguage) -> String {
         var components = [
-            "项目 \(projectName)",
-            "任务 \(title)",
-            state.accessibilityDescription,
-            activityDate.pulseRelativeDescription(),
+            PulseL10n.text("项目 %@", language: language, projectName),
+            PulseL10n.text("任务 %@", language: language, title),
+            state.accessibilityDescription(language: language),
+            activityDate.pulseRelativeDescription(language: language),
         ]
         if isUnread {
-            components.append("未查看")
+            components.append(PulseL10n.text("未查看", language: language))
         }
         if let tokenUsage {
-            components.append("共 \(tokenUsage.compactTotalText) tokens")
+            components.append(PulseL10n.text(
+                "共 %@ tokens",
+                language: language,
+                tokenUsage.compactTotalText
+            ))
         }
         if let agentActivity {
             let presentation = AgentActivityBadgePresentation(
                 observation: agentActivity,
                 taskState: state,
-                now: .now
+                now: .now,
+                language: language
             )
             if presentation.isVisible {
                 components.append(presentation.accessibilityLabel)
             }
         }
-        return components.joined(separator: "，")
+        return components.joined(separator: " · ")
     }
 
     var hasTrailingMetrics: Bool {

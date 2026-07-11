@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct AgentActivityBadge: View {
+    @Environment(\.pulseLanguage) private var language
+
     let observation: AgentActivityObservation
     let taskState: PulseTaskState
     let now: Date
@@ -9,7 +11,8 @@ struct AgentActivityBadge: View {
         AgentActivityBadgePresentation(
             observation: observation,
             taskState: taskState,
-            now: now
+            now: now,
+            language: language
         )
     }
 
@@ -113,7 +116,8 @@ struct AgentActivityBadgePresentation: Equatable, Sendable {
     init(
         observation: AgentActivityObservation,
         taskState: PulseTaskState,
-        now: Date
+        now: Date,
+        language: AppLanguage = .simplifiedChinese
     ) {
         let count = observation.activeCount.map { max(0, $0) }
 
@@ -125,7 +129,7 @@ struct AgentActivityBadgePresentation: Equatable, Sendable {
         switch observation.confidence {
         case .exact:
             guard let count else {
-                self = Self.unavailable
+                self = Self.unavailable(language: language)
                 return
             }
             let isActiveZeroAnomaly = !taskState.isTerminal && count == 0
@@ -136,11 +140,18 @@ struct AgentActivityBadgePresentation: Equatable, Sendable {
             let helpText: String
 
             if isActiveZeroAnomaly {
-                helpText = "当前观测到 0 个活跃 Agent；活动任务通常至少包含主 Agent，请稍后刷新。"
+                helpText = PulseL10n.text(
+                    "当前观测到 0 个活跃 Agent；活动任务通常至少包含主 Agent，请稍后刷新。",
+                    language: language
+                )
             } else if hasActiveAgentAfterTerminal {
-                helpText = "主任务已结束，但仍有 \(count) 个 Agent 未结束。"
+                helpText = PulseL10n.text(
+                    "主任务已结束，但仍有 %d 个 Agent 未结束。",
+                    language: language,
+                    count
+                )
             } else {
-                helpText = Self.currentHelpText(count: count)
+                helpText = Self.currentHelpText(count: count, language: language)
             }
 
             self.init(
@@ -154,20 +165,35 @@ struct AgentActivityBadgePresentation: Equatable, Sendable {
 
         case .provisional:
             guard let count else {
+                let helpText = PulseL10n.text(
+                    "正在确认该任务的 Agent 状态。",
+                    language: language
+                )
                 self.init(
                     isVisible: true,
                     displayText: "Agent …",
                     emphasis: .neutral,
                     showsFreshnessWarning: false,
-                    helpText: "正在确认该任务的 Agent 状态。",
-                    accessibilityLabel: "正在确认该任务的 Agent 状态"
+                    helpText: helpText,
+                    accessibilityLabel: PulseL10n.text(
+                        "正在确认该任务的 Agent 状态",
+                        language: language
+                    )
                 )
                 return
             }
             let hasActiveAgentAfterTerminal = taskState.isTerminal && count > 0
             let helpText = hasActiveAgentAfterTerminal
-                ? "主任务已结束，但观测到约 \(count) 个 Agent 仍未结束；数据仍在确认中。"
-                : "当前约有 \(count) 个活跃 Agent，数据仍在确认中；等待授权或回答也计入。"
+                ? PulseL10n.text(
+                    "主任务已结束，但观测到约 %d 个 Agent 仍未结束；数据仍在确认中。",
+                    language: language,
+                    count
+                )
+                : PulseL10n.text(
+                    "当前约有 %d 个活跃 Agent，数据仍在确认中；等待授权或回答也计入。",
+                    language: language,
+                    count
+                )
             self.init(
                 isVisible: true,
                 displayText: "Agent ~\(count)",
@@ -179,18 +205,33 @@ struct AgentActivityBadgePresentation: Equatable, Sendable {
 
         case .stale:
             guard let count else {
+                let helpText = PulseL10n.text(
+                    "Agent 数据已过期，且没有可用的历史观测值。",
+                    language: language
+                )
                 self.init(
                     isVisible: true,
                     displayText: "Agent —",
                     emphasis: .warning,
                     showsFreshnessWarning: true,
-                    helpText: "Agent 数据已过期，且没有可用的历史观测值。",
-                    accessibilityLabel: "Agent 状态不可用，数据已过期"
+                    helpText: helpText,
+                    accessibilityLabel: PulseL10n.text(
+                        "Agent 状态不可用，数据已过期",
+                        language: language
+                    )
                 )
                 return
             }
-            let ageText = observation.observedAt.pulseRelativeDescription(asOf: now)
-            let helpText = "上次观测到 \(count) 个活跃 Agent，更新于 \(ageText)；当前数据可能已过期。"
+            let ageText = observation.observedAt.pulseRelativeDescription(
+                asOf: now,
+                language: language
+            )
+            let helpText = PulseL10n.text(
+                "上次观测到 %d 个活跃 Agent，更新于 %@；当前数据可能已过期。",
+                language: language,
+                count,
+                ageText
+            )
             self.init(
                 isVisible: true,
                 displayText: "Agent \(count)",
@@ -201,7 +242,7 @@ struct AgentActivityBadgePresentation: Equatable, Sendable {
             )
 
         case .unavailable:
-            self = Self.unavailable
+            self = Self.unavailable(language: language)
         }
     }
 
@@ -214,19 +255,31 @@ struct AgentActivityBadgePresentation: Equatable, Sendable {
         accessibilityLabel: ""
     )
 
-    private static let unavailable = AgentActivityBadgePresentation(
-        isVisible: true,
-        displayText: "Agent —",
-        emphasis: .unavailable,
-        showsFreshnessWarning: false,
-        helpText: "暂时无法读取该任务的 Agent 状态。",
-        accessibilityLabel: "Agent 状态暂时不可用"
-    )
+    private static func unavailable(language: AppLanguage) -> AgentActivityBadgePresentation {
+        AgentActivityBadgePresentation(
+            isVisible: true,
+            displayText: "Agent —",
+            emphasis: .unavailable,
+            showsFreshnessWarning: false,
+            helpText: PulseL10n.text(
+                "暂时无法读取该任务的 Agent 状态。",
+                language: language
+            ),
+            accessibilityLabel: PulseL10n.text(
+                "Agent 状态暂时不可用",
+                language: language
+            )
+        )
+    }
 
-    private static func currentHelpText(count: Int) -> String {
+    private static func currentHelpText(count: Int, language: AppLanguage) -> String {
         if count == 0 {
-            return "当前没有未结束的 Agent。"
+            return PulseL10n.text("当前没有未结束的 Agent。", language: language)
         }
-        return "当前有 \(count) 个活跃 Agent，包含主 Agent 和所有层级子 Agent；等待授权或回答也计入。"
+        return PulseL10n.text(
+            "当前有 %d 个活跃 Agent，包含主 Agent 和所有层级子 Agent；等待授权或回答也计入。",
+            language: language,
+            count
+        )
     }
 }

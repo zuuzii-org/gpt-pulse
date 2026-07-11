@@ -10,6 +10,7 @@ final class PulseSettingsTests: XCTestCase {
 
         let settings = PulseSettings(defaults: defaults)
 
+        XCTAssertEqual(settings.appLanguage, .system)
         XCTAssertTrue(settings.edgeTriggerEnabled)
         XCTAssertTrue(settings.disableInFullScreen)
         XCTAssertTrue(settings.notificationsEnabled)
@@ -30,6 +31,7 @@ final class PulseSettingsTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let settings = PulseSettings(defaults: defaults)
+        settings.appLanguage = .english
         settings.edgeTriggerEnabled = false
         settings.notificationSoundEnabled = true
         settings.notificationAttentionLevel = .important
@@ -44,6 +46,7 @@ final class PulseSettingsTests: XCTestCase {
         XCTAssertEqual(persistedMuteKeys.first?.count, 64)
 
         let reloaded = PulseSettings(defaults: defaults)
+        XCTAssertEqual(reloaded.appLanguage, .english)
         XCTAssertFalse(reloaded.edgeTriggerEnabled)
         XCTAssertTrue(reloaded.notificationSoundEnabled)
         XCTAssertEqual(reloaded.notificationAttentionLevel, .important)
@@ -59,6 +62,18 @@ final class PulseSettingsTests: XCTestCase {
 
         reloaded.unmuteProject("/tmp/project")
         XCTAssertFalse(reloaded.isProjectMuted("/tmp/project", asOf: expiration.addingTimeInterval(-1)))
+    }
+
+    func testLocalizedCopySupportsExplicitChineseAndEnglish() {
+        XCTAssertEqual(
+            PulseL10n.text("设置", language: .simplifiedChinese),
+            "设置"
+        )
+        XCTAssertEqual(PulseL10n.text("设置", language: .english), "Settings")
+        XCTAssertEqual(
+            PulseL10n.text("%d 个任务已完成", language: .english, 3),
+            "3 Tasks Completed"
+        )
     }
 
     func testExpiredProjectMutesAreIgnoredAndCleanedUp() {

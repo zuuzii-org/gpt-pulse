@@ -5,26 +5,37 @@ extension PulseTask {
         ProjectDirectoryIdentityResolver.resolve(projectDirectory)
     }
 
+    func projectDisplayName(language: AppLanguage) -> String {
+        let displayName = projectDisplayName
+        return displayName == "未识别项目"
+            ? PulseL10n.text("未识别项目", language: language)
+            : displayName
+    }
+
     var projectIdentityDirectory: String {
         ProjectDirectoryIdentityResolver.identityDirectory(projectDirectory)
     }
 
     var displayStatusText: String {
+        displayStatusText(language: .simplifiedChinese)
+    }
+
+    func displayStatusText(language: AppLanguage) -> String {
         switch lastStatus {
         case "running":
-            return "正在执行"
+            return PulseL10n.text("正在执行", language: language)
         case "waitingForApproval":
-            return "等待你授权"
+            return PulseL10n.text("等待你授权", language: language)
         case "waitingForAnswer":
-            return "等待你回答"
+            return PulseL10n.text("等待你回答", language: language)
         case "finalizing":
-            return "正在整理结果"
+            return PulseL10n.text("正在整理结果", language: language)
         case "completed":
-            return "已完成"
+            return PulseL10n.text("已完成", language: language)
         case "failed":
-            return "执行失败"
+            return PulseL10n.text("执行失败", language: language)
         case "interrupted":
-            return "已中断"
+            return PulseL10n.text("已中断", language: language)
         default:
             return lastStatus
         }
@@ -83,7 +94,8 @@ extension RateLimitWindowSnapshot {
 extension Date {
     func pulseQuotaResetDescription(
         asOf _: Date = .now,
-        timeZone: TimeZone = .autoupdatingCurrent
+        timeZone: TimeZone = .autoupdatingCurrent,
+        language: AppLanguage = .simplifiedChinese
     ) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
@@ -92,7 +104,11 @@ extension Date {
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return "重置 " + formatter.string(from: self)
+        return PulseL10n.text(
+            "重置 %@",
+            language: language,
+            formatter.string(from: self)
+        )
     }
 }
 
@@ -171,43 +187,64 @@ enum ProjectDirectoryIdentityResolver {
 
 extension AdapterHealth {
     var displayMessage: String {
+        displayMessage(language: .simplifiedChinese)
+    }
+
+    func displayMessage(language: AppLanguage) -> String {
         switch adapter {
         case .appServer:
-            return "Codex 本地协议暂不可用，当前使用兼容数据源"
+            return PulseL10n.text(
+                "Codex 本地协议暂不可用，当前使用兼容数据源",
+                language: language
+            )
         case .sqlite:
-            return "无法读取 Codex 本地任务索引"
+            return PulseL10n.text("无法读取 Codex 本地任务索引", language: language)
         case .rolloutJSONL:
-            return "无法读取 Codex 任务事件记录"
+            return PulseL10n.text("无法读取 Codex 任务事件记录", language: language)
         case .pluginJournal:
-            return "插件事件日志尚未生成，当前使用兼容数据源"
+            return PulseL10n.text(
+                "插件事件日志尚未生成，当前使用兼容数据源",
+                language: language
+            )
         case .receipts:
-            return "未查看状态暂时无法保存"
+            return PulseL10n.text("未查看状态暂时无法保存", language: language)
         }
     }
 }
 
 extension Date {
-    func pulseRelativeDescription(asOf now: Date = .now) -> String {
+    func pulseRelativeDescription(
+        asOf now: Date = .now,
+        language: AppLanguage = .simplifiedChinese
+    ) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(self)))
 
-        if seconds < 10 { return "刚刚" }
-        if seconds < 60 { return "\(seconds) 秒前" }
+        if seconds < 10 { return PulseL10n.text("刚刚", language: language) }
+        if seconds < 60 {
+            return PulseL10n.text("%d 秒前", language: language, seconds)
+        }
 
         let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes) 分钟前" }
+        if minutes < 60 {
+            return PulseL10n.text("%d 分钟前", language: language, minutes)
+        }
 
         let hours = minutes / 60
-        if hours < 24 { return "\(hours) 小时前" }
+        if hours < 24 {
+            return PulseL10n.text("%d 小时前", language: language, hours)
+        }
 
         let days = hours / 24
-        if days < 30 { return "\(days) 天前" }
+        if days < 30 {
+            return PulseL10n.text("%d 天前", language: language, days)
+        }
 
         return formatted(
             .dateTime
                 .year()
                 .month()
                 .day()
-                .locale(Locale(identifier: "zh_CN"))
+                .locale(language.locale)
         )
     }
 }

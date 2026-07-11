@@ -14,6 +14,8 @@ struct GPTPulseApp: App {
                     await appDelegate.requestNotificationAuthorization()
                 }
             )
+            .environment(\.locale, appDelegate.settings.appLanguage.locale)
+            .environment(\.pulseLanguage, appDelegate.settings.appLanguage)
         }
         .windowResizability(.contentSize)
     }

@@ -130,6 +130,24 @@ final class PulseTaskPresentationTests: XCTestCase {
         )
     }
 
+    func testEnglishPresentationLocalizesStatusRelativeTimeAndQuotaReset() {
+        let task = makeTask(projectDirectory: "/tmp/project")
+        XCTAssertEqual(task.displayStatusText(language: .english), "Running")
+
+        let now = Date(timeIntervalSince1970: 1_700_000_120)
+        let earlier = now.addingTimeInterval(-120)
+        XCTAssertEqual(
+            earlier.pulseRelativeDescription(asOf: now, language: .english),
+            "2 minutes ago"
+        )
+
+        let timeZone = try! XCTUnwrap(TimeZone(identifier: "UTC"))
+        XCTAssertEqual(
+            now.pulseQuotaResetDescription(timeZone: timeZone, language: .english),
+            "Resets 2023-11-14 22:15"
+        )
+    }
+
     private func makeTask(projectDirectory: String) -> PulseTask {
         PulseTask(
             threadId: UUID().uuidString,

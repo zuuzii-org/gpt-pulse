@@ -26,18 +26,18 @@ enum PulseNotificationKind: String {
         }
     }
 
-    var title: String {
+    func title(language: AppLanguage) -> String {
         switch self {
         case .waitingForApproval:
-            return "Codex 等待授权"
+            return PulseL10n.text("Codex 等待授权", language: language)
         case .waitingForAnswer:
-            return "Codex 等待你的回答"
+            return PulseL10n.text("Codex 等待你的回答", language: language)
         case .completed:
-            return "任务已完成"
+            return PulseL10n.text("任务已完成", language: language)
         case .failed:
-            return "任务执行失败"
+            return PulseL10n.text("任务执行失败", language: language)
         case .interrupted:
-            return "任务已中断"
+            return PulseL10n.text("任务已中断", language: language)
         }
     }
 
@@ -124,15 +124,17 @@ struct CompletionNotificationSummary: Equatable, Sendable {
     let subtitle: String
     let body: String
 
-    init(tasks: [PulseTask]) {
+    init(tasks: [PulseTask], language: AppLanguage = .simplifiedChinese) {
         let projectCount = Set(tasks.map(\.projectIdentityDirectory)).count
         let summaryTitles = tasks.prefix(3).map {
-            "\($0.projectDisplayName) · \($0.title)"
+            "\($0.projectDisplayName(language: language)) · \($0.title)"
         }
-        title = "\(tasks.count) 个任务已完成"
-        subtitle = projectCount == 1 ? "同一项目" : "来自 \(projectCount) 个项目"
-        body = summaryTitles.joined(separator: "；")
-            + (tasks.count > summaryTitles.count ? "；…" : "")
+        title = PulseL10n.text("%d 个任务已完成", language: language, tasks.count)
+        subtitle = projectCount == 1
+            ? PulseL10n.text("同一项目", language: language)
+            : PulseL10n.text("来自 %d 个项目", language: language, projectCount)
+        body = summaryTitles.joined(separator: " · ")
+            + (tasks.count > summaryTitles.count ? " · …" : "")
     }
 }
 
@@ -249,6 +251,7 @@ final class NotificationService {
     private let onOpenTask: @MainActor (TaskNotificationRoute) -> Void
     private let onMarkViewed: @MainActor (TaskNotificationRoute) async -> Void
     private let onOpenPanel: @MainActor () -> Void
+    private var languageCancellable: AnyCancellable?
 
     var isEnabled: Bool { settings.notificationsEnabled }
 
@@ -271,6 +274,12 @@ final class NotificationService {
         }
         center.delegate = delegateBridge
         registerCategories()
+        languageCancellable = settings.$appLanguage
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.registerCategories()
+            }
     }
 
     func requestAuthorizationIfNeeded() async {
@@ -306,11 +315,12 @@ final class NotificationService {
         }
 
         let content = UNMutableNotificationContent()
-        content.title = kind.title
-        content.subtitle = task.projectDisplayName
-        let statusText = task.displayStatusText.isEmpty
-            ? kind.title
-            : task.displayStatusText
+        let language = settings.appLanguage
+        let notificationTitle = kind.title(language: language)
+        content.title = notificationTitle
+        content.subtitle = task.projectDisplayName(language: language)
+        let localizedStatus = task.displayStatusText(language: language)
+        let statusText = localizedStatus.isEmpty ? notificationTitle : localizedStatus
         content.body = "\(task.title) · \(statusText)"
         content.categoryIdentifier = kind.categoryIdentifier
         content.threadIdentifier = task.threadId
@@ -356,7 +366,10 @@ final class NotificationService {
             return .suppressed
         }
 
-        let summary = CompletionNotificationSummary(tasks: visibleTasks)
+        let summary = CompletionNotificationSummary(
+            tasks: visibleTasks,
+            language: settings.appLanguage
+        )
 
         let content = UNMutableNotificationContent()
         content.title = summary.title
@@ -389,9 +402,31 @@ final class NotificationService {
         }
 
         let content = UNMutableNotificationContent()
-        content.title = "\(alert.windowTitle)额度仅剩 \(alert.remainingPercent)%"
-        content.subtitle = "低于 \(alert.threshold)% 提醒阈值"
-        content.body = "将在 \(alert.resetsAt.formatted(date: .abbreviated, time: .shortened)) 重置。"
+        let language = settings.appLanguage
+        let windowTitle = alert.windowMinutes == 300
+            ? "5h"
+            : PulseL10n.text("本周", language: language)
+        content.title = PulseL10n.text(
+            "%@额度仅剩 %d%%",
+            language: language,
+            windowTitle,
+            alert.remainingPercent
+        )
+        content.subtitle = PulseL10n.text(
+            "低于 %d%% 提醒阈值",
+            language: language,
+            alert.threshold
+        )
+        let resetText = alert.resetsAt.formatted(
+            .dateTime
+                .year()
+                .month()
+                .day()
+                .hour()
+                .minute()
+                .locale(language.locale)
+        )
+        content.body = PulseL10n.text("将在 %@ 重置。", language: language, resetText)
         content.categoryIdentifier = PulseNotificationCategory.quota
         content.threadIdentifier = "gpt-pulse.quota.\(alert.windowMinutes)"
         content.userInfo = [
@@ -460,29 +495,30 @@ final class NotificationService {
     }
 
     private func registerCategories() {
+        let language = settings.appLanguage
         let openTask = UNNotificationAction(
             identifier: PulseNotificationAction.openTask,
-            title: "在 Codex 中打开",
+            title: PulseL10n.text("在 Codex 中打开", language: language),
             options: [.foreground]
         )
         let openPanel = UNNotificationAction(
             identifier: PulseNotificationAction.openPanel,
-            title: "打开 GPT Pulse",
+            title: PulseL10n.text("打开 GPT Pulse", language: language),
             options: [.foreground]
         )
         let snooze15 = UNNotificationAction(
             identifier: PulseNotificationAction.snooze15Minutes,
-            title: "15 分钟后提醒",
+            title: PulseL10n.text("15 分钟后提醒", language: language),
             options: []
         )
         let snoozeHour = UNNotificationAction(
             identifier: PulseNotificationAction.snoozeOneHour,
-            title: "1 小时后提醒",
+            title: PulseL10n.text("1 小时后提醒", language: language),
             options: []
         )
         let markViewed = UNNotificationAction(
             identifier: PulseNotificationAction.markViewed,
-            title: "标记为已查看",
+            title: PulseL10n.text("标记为已查看", language: language),
             options: []
         )
 
