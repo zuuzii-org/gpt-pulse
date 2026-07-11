@@ -738,6 +738,11 @@ create_and_sign_dmg() {
     fi
   fi
 
+  apply_finder_layout "$background_name"
+
+  # Finder can clear the custom-volume-icon file and bit while persisting its
+  # window layout. Install the icon only after Finder has finished writing the
+  # volume metadata so both survive detach and image conversion.
   if [[ -z "$effective_volume_icon" ]]; then
     effective_volume_icon="$APP_PATH/Contents/Resources/AppIcon.icns"
   fi
@@ -749,7 +754,6 @@ create_and_sign_dmg() {
     run "$setfile_path" -a C "$MOUNT_DIR"
   fi
 
-  apply_finder_layout "$background_name"
   run /bin/sync
   run /usr/bin/hdiutil detach "$MOUNT_DIR"
   if ! is_true "$DRY_RUN"; then
