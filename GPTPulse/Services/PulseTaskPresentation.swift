@@ -81,19 +81,17 @@ extension RateLimitWindowSnapshot {
 }
 
 extension Date {
-    func pulseQuotaResetDescription(asOf now: Date = .now) -> String {
-        let calendar = Calendar.autoupdatingCurrent
+    func pulseQuotaResetDescription(
+        asOf _: Date = .now,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
-
-        if calendar.isDate(self, inSameDayAs: now) {
-            formatter.dateFormat = "HH:mm"
-        } else if self <= now.addingTimeInterval(7 * 24 * 60 * 60) {
-            formatter.dateFormat = "EEE HH:mm"
-        } else {
-            formatter.dateFormat = "M月d日"
-        }
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return "重置 " + formatter.string(from: self)
     }
 }

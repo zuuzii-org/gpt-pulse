@@ -25,21 +25,21 @@ The app interface is currently in Simplified Chinese. This documentation is avai
 
 ## Download
 
-[Download the latest signed and notarized DMG](https://github.com/zuuzii-org/gpt-pulse/releases/latest). GPT Pulse v1.1.0 requires macOS 14 or later and ships as a Universal App for Apple Silicon and Intel Macs.
+[Download the latest signed and notarized DMG](https://github.com/zuuzii-org/gpt-pulse/releases/latest). GPT Pulse v1.2.0 requires macOS 14 or later and ships as a Universal App for Apple Silicon and Intel Macs.
 
 Release assets include:
 
-- `GPT-Pulse-1.1.0.dmg`
-- `GPT-Pulse-1.1.0.dmg.sha256`
+- `GPT-Pulse-1.2.0.dmg`
+- `GPT-Pulse-1.2.0.dmg.sha256`
 - `appcast.xml` for Sparkle update checks
 
 To verify the download, place both files in the same folder and run:
 
 ```bash
-shasum -a 256 -c GPT-Pulse-1.1.0.dmg.sha256
+shasum -a 256 -c GPT-Pulse-1.2.0.dmg.sha256
 ```
 
-If you are using v1.0.0, install v1.1.0 manually once. v1.0.0 did not include Sparkle, so it cannot discover the new update channel. Starting with v1.1.0, right-click the menu bar item and choose `检查更新…` (“Check for Updates…”) to update in place.
+If you are using v1.0.0, install v1.1.0 manually once. v1.0.0 did not include Sparkle, so it cannot discover the update channel. From v1.1.0 onward, right-click the menu bar item and choose `检查更新…` (“Check for Updates…”) to update in place.
 
 ## What GPT Pulse shows
 
@@ -96,7 +96,7 @@ The check does not attach Codex task data or a generated system profile. If you 
 
 ## Update with Sparkle
 
-GPT Pulse v1.1.0 adds Sparkle 2 for in-app updates. Right-click the menu bar item and choose `检查更新…` to check the public release feed. Sparkle verifies the signed update before installation.
+GPT Pulse v1.1.0 added Sparkle 2 for in-app updates. Right-click the menu bar item and choose `检查更新…` to check the public release feed. Sparkle verifies the signed update before installation.
 
 v1.1.0 is the bootstrap release for this update channel. Users on v1.0.0 must download and install v1.1.0 manually once; later releases can be installed from inside GPT Pulse.
 
@@ -105,7 +105,7 @@ v1.1.0 is the bootstrap release for this update channel. Users on v1.0.0 must do
 The app works without the plugin by falling back to read-only SQLite and rollout JSONL. Installing the bundled lifecycle hooks improves the timeliness of running and approval-waiting states.
 
 ```bash
-codex plugin marketplace add zuuzii-org/gpt-pulse --ref v1.1.0
+codex plugin marketplace add zuuzii-org/gpt-pulse --ref v1.2.0
 codex plugin add gpt-pulse@gpt-pulse
 ```
 

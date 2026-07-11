@@ -1022,7 +1022,9 @@ private struct QuotaWindowRow: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(width: 84, alignment: .trailing)
+                .minimumScaleFactor(0.72)
+                .allowsTightening(true)
+                .frame(width: 128, alignment: .trailing)
         }
         .accessibilityElement(children: .combine)
     }

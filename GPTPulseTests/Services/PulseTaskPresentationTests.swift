@@ -82,18 +82,51 @@ final class PulseTaskPresentationTests: XCTestCase {
         )
     }
 
-    func testQuotaResetDescriptionUsesCompactResetLabel() {
-        let calendar = Calendar.autoupdatingCurrent
-        let now = calendar.startOfDay(for: Date(timeIntervalSince1970: 1_700_000_000))
-            .addingTimeInterval(60 * 60)
-        let reset = now.addingTimeInterval(2 * 60 * 60)
-        let description = reset.pulseQuotaResetDescription(asOf: now)
+    func testQuotaResetDescriptionUsesConcreteDateAndTime() {
+        let timeZone = try! XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let calendar = Calendar(identifier: .gregorian)
+        let now = calendar.date(from: DateComponents(
+            timeZone: timeZone,
+            year: 2026,
+            month: 7,
+            day: 11,
+            hour: 22,
+            minute: 0
+        ))!
+        let reset = calendar.date(from: DateComponents(
+            timeZone: timeZone,
+            year: 2026,
+            month: 7,
+            day: 12,
+            hour: 0,
+            minute: 1
+        ))!
 
-        XCTAssertNotNil(
-            description.range(
-                of: #"^重置 \d{2}:\d{2}$"#,
-                options: .regularExpression
-            )
+        XCTAssertEqual(
+            reset.pulseQuotaResetDescription(asOf: now, timeZone: timeZone),
+            "重置 2026-07-12 00:01"
+        )
+    }
+
+    func testQuotaResetDescriptionUsesRequestedSystemTimeZoneForDateBoundary() {
+        let utc = try! XCTUnwrap(TimeZone(identifier: "UTC"))
+        let shanghai = try! XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let reset = Calendar(identifier: .gregorian).date(from: DateComponents(
+            timeZone: utc,
+            year: 2026,
+            month: 7,
+            day: 11,
+            hour: 0,
+            minute: 1
+        ))!
+
+        XCTAssertEqual(
+            reset.pulseQuotaResetDescription(timeZone: utc),
+            "重置 2026-07-11 00:01"
+        )
+        XCTAssertEqual(
+            reset.pulseQuotaResetDescription(timeZone: shanghai),
+            "重置 2026-07-11 08:01"
         )
     }
 
