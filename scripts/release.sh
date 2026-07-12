@@ -8,7 +8,7 @@ readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly PROJECT_FILE="$REPO_ROOT/GPTPulse.xcodeproj"
 readonly PROJECT_SPEC="$REPO_ROOT/project.yml"
 readonly INFO_PLIST="$REPO_ROOT/GPTPulse/Resources/Info.plist"
-readonly APP_NAME="LLM Pulse.app"
+readonly BUILT_APP_NAME="LLM Pulse.app"
 readonly DISTRIBUTED_APP_NAME="GPT Pulse.app"
 readonly APP_EXECUTABLE="LLM Pulse"
 readonly SCHEME="GPTPulse"
@@ -279,7 +279,7 @@ initialize_paths() {
 
   DERIVED_DATA="$REPO_ROOT/.build/release/DerivedData"
   WORK_DIR="$REPO_ROOT/.build/release/work-v$VERSION"
-  APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME"
+  APP_PATH="$DERIVED_DATA/Build/Products/Release/$BUILT_APP_NAME"
   APP_ZIP_PATH="$WORK_DIR/LLM-Pulse-$VERSION-notarization.zip"
   DMG_PATH="$OUTPUT_DIR/LLM-Pulse-$VERSION.dmg"
   CHECKSUM_PATH="$DMG_PATH.sha256"
@@ -580,7 +580,7 @@ verify_app_metadata() {
   local app="$1"
   local plist="$app/Contents/Info.plist"
   local sparkle_framework="$app/Contents/Frameworks/Sparkle.framework"
-  local bundle_id short_version build_version ui_element minimum_system
+  local bundle_id bundle_name display_name executable_name short_version build_version ui_element minimum_system
   local source_build feed_url public_key verify_before_extraction linked_framework
   require_file "$plist"
   require_file "$app/Contents/Resources/AppIcon.icns"
@@ -591,6 +591,9 @@ verify_app_metadata() {
   fi
 
   bundle_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$plist")"
+  bundle_name="$(/usr/bin/plutil -extract CFBundleName raw -o - "$plist")"
+  display_name="$(/usr/bin/plutil -extract CFBundleDisplayName raw -o - "$plist")"
+  executable_name="$(/usr/bin/plutil -extract CFBundleExecutable raw -o - "$plist")"
   short_version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$plist")"
   build_version="$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$plist")"
   ui_element="$(/usr/bin/plutil -extract LSUIElement raw -o - "$plist")"
@@ -601,6 +604,9 @@ verify_app_metadata() {
   verify_before_extraction="$(/usr/bin/plutil -extract SUVerifyUpdateBeforeExtraction raw -o - "$plist")"
 
   [[ "$bundle_id" == "com.zuuzii.GPTPulse" ]] || die "unexpected bundle ID: $bundle_id"
+  [[ "$bundle_name" == "LLM Pulse" ]] || die "unexpected bundle name: $bundle_name"
+  [[ "$display_name" == "LLM Pulse" ]] || die "unexpected display name: $display_name"
+  [[ "$executable_name" == "$APP_EXECUTABLE" ]] || die "unexpected executable name: $executable_name"
   [[ "$short_version" == "$VERSION" ]] || die "unexpected app version: $short_version"
   [[ "$build_version" == "$source_build" ]] || die "unexpected app build: $build_version"
   [[ "$ui_element" == "true" || "$ui_element" == "1" ]] || die "LSUIElement is not enabled"
@@ -1114,7 +1120,7 @@ generate_and_verify_appcast() {
 
 verify_final_release() {
   local mounted_app="$MOUNT_DIR/$DISTRIBUTED_APP_NAME"
-  local getfileinfo_path volume_attributes
+  local app_count app_entry getfileinfo_path volume_attributes
   log "performing final offline verification"
   require_clean_worktree
   validate_release_manifest
@@ -1138,6 +1144,14 @@ verify_final_release() {
   run /usr/bin/xcrun stapler validate -v "$mounted_app"
   run /usr/sbin/spctl --assess --type execute --verbose=4 "$mounted_app"
   if ! is_true "$DRY_RUN"; then
+    app_count=0
+    for app_entry in "$MOUNT_DIR"/*.app; do
+      [[ -e "$app_entry" ]] || continue
+      app_count=$((app_count + 1))
+    done
+    [[ "$app_count" -eq 1 ]] || die "DMG must contain exactly one application bundle"
+    [[ ! -e "$MOUNT_DIR/$BUILT_APP_NAME" ]] || \
+      die "bridge DMG must not contain the built wrapper name: $BUILT_APP_NAME"
     [[ -L "$MOUNT_DIR/Applications" ]] || die "DMG Applications item is not a symlink"
     [[ "$(/usr/bin/readlink "$MOUNT_DIR/Applications")" == "/Applications" ]] || \
       die "DMG Applications symlink has the wrong target"
