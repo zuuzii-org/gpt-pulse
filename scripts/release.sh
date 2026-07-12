@@ -8,13 +8,13 @@ readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly PROJECT_FILE="$REPO_ROOT/GPTPulse.xcodeproj"
 readonly PROJECT_SPEC="$REPO_ROOT/project.yml"
 readonly INFO_PLIST="$REPO_ROOT/GPTPulse/Resources/Info.plist"
-readonly APP_NAME="GPT Pulse.app"
-readonly APP_EXECUTABLE="GPT Pulse"
+readonly APP_NAME="LLM Pulse.app"
+readonly APP_EXECUTABLE="LLM Pulse"
 readonly SCHEME="GPTPulse"
-readonly VOLUME_NAME="GPT Pulse"
-readonly SPARKLE_FEED_URL="https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml"
-readonly RELEASE_DOWNLOAD_ROOT="https://github.com/zuuzii-org/gpt-pulse/releases/download"
-readonly PROJECT_URL="https://github.com/zuuzii-org/gpt-pulse"
+readonly VOLUME_NAME="LLM Pulse"
+readonly SPARKLE_FEED_URL="https://github.com/zuuzii-org/llm-pulse/releases/latest/download/appcast.xml"
+readonly RELEASE_DOWNLOAD_ROOT="https://github.com/zuuzii-org/llm-pulse/releases/download"
+readonly PROJECT_URL="https://github.com/zuuzii-org/llm-pulse"
 readonly DEFAULT_SPARKLE_PRIVATE_KEY_FILE="$HOME/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key"
 
 STAGE="all"
@@ -56,7 +56,7 @@ MANIFEST_PLANNED=0
 
 usage() {
   cat <<'EOF'
-Build, sign, notarize, package, and verify GPT Pulse for macOS.
+Build, sign, notarize, package, and verify LLM Pulse for macOS.
 
 Usage:
   scripts/release.sh [options]
@@ -279,8 +279,8 @@ initialize_paths() {
   DERIVED_DATA="$REPO_ROOT/.build/release/DerivedData"
   WORK_DIR="$REPO_ROOT/.build/release/work-v$VERSION"
   APP_PATH="$DERIVED_DATA/Build/Products/Release/$APP_NAME"
-  APP_ZIP_PATH="$WORK_DIR/GPT-Pulse-$VERSION-notarization.zip"
-  DMG_PATH="$OUTPUT_DIR/GPT-Pulse-$VERSION.dmg"
+  APP_ZIP_PATH="$WORK_DIR/LLM-Pulse-$VERSION-notarization.zip"
+  DMG_PATH="$OUTPUT_DIR/LLM-Pulse-$VERSION.dmg"
   CHECKSUM_PATH="$DMG_PATH.sha256"
   APPCAST_PATH="$OUTPUT_DIR/appcast.xml"
   RELEASE_NOTES_PATH="$REPO_ROOT/docs/release-notes-v$VERSION.md"
@@ -892,8 +892,8 @@ calculate_dmg_size_mb() {
 }
 
 create_and_sign_dmg() {
-  local rw_dmg="$WORK_DIR/GPT-Pulse-$VERSION-rw.dmg"
-  local unsigned_dmg="$WORK_DIR/GPT-Pulse-$VERSION-unsigned.dmg"
+  local rw_dmg="$WORK_DIR/LLM-Pulse-$VERSION-rw.dmg"
+  local unsigned_dmg="$WORK_DIR/LLM-Pulse-$VERSION-unsigned.dmg"
   local background_name=""
   local background_2x=""
   local effective_volume_icon="$VOLUME_ICON_PATH"
@@ -1064,7 +1064,7 @@ verify_appcast() {
 generate_and_verify_appcast() {
   local source_dir="$WORK_DIR/appcast-source"
   local source_dmg="$source_dir/$(basename "$DMG_PATH")"
-  local source_notes="$source_dir/GPT-Pulse-$VERSION.md"
+  local source_notes="$source_dir/LLM-Pulse-$VERSION.md"
   local generated_appcast="$source_dir/appcast.xml"
 
   log "generating Sparkle appcast from the final notarized DMG"

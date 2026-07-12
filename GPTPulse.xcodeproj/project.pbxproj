@@ -72,6 +72,7 @@
 		E08FCAF779E4DF82BCE94090 /* AppServerCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9DE714183BA7C5F43D70679 /* AppServerCapability.swift */; };
 		E2A0533AB0F8CA988D8B5382 /* CodexAppServerRateLimitClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A8D305EF60B638E4D893FA4 /* CodexAppServerRateLimitClient.swift */; };
 		E55F62CE40F35650F9A3CFDC /* TaskOpeningService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FBBA0A0CDD659136273FE44 /* TaskOpeningService.swift */; };
+		E8D9B15DC11601C2AB4A4640 /* PulseBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C8A0A6B0D8FA0C9DC421D26 /* PulseBrand.swift */; };
 		EEC0FAB57E40D583C2249DCD /* CodexRolloutAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D093342F0C0F73AC03E51EC7 /* CodexRolloutAdapter.swift */; };
 		F6DD9A5EB80998DFDCBCA723 /* LaunchAtLoginService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0375DABAD850F9752DE0161D /* LaunchAtLoginService.swift */; };
 		FEE8E52C63B60F1EE3030E72 /* RolloutRateLimitSelectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C842085F3E05CCEB88177F2 /* RolloutRateLimitSelectorTests.swift */; };
@@ -109,6 +110,7 @@
 		31BBDF1CA859F4BFD5105849 /* SessionIndexReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionIndexReader.swift; sourceTree = "<group>"; };
 		34084575BE0C798476590E8F /* CodexAccountRateLimitObserverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAccountRateLimitObserverTests.swift; sourceTree = "<group>"; };
 		3B829E21D139F4531F9F7DB5 /* RolloutJSONLTailParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RolloutJSONLTailParser.swift; sourceTree = "<group>"; };
+		3C8A0A6B0D8FA0C9DC421D26 /* PulseBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PulseBrand.swift; sourceTree = "<group>"; };
 		41D04E0885E68BCF53181963 /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
 		4287634E341B6A5B19DDF160 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		47038B4AE9DE2D3DAE10BC55 /* PulseTaskPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PulseTaskPresentationTests.swift; sourceTree = "<group>"; };
@@ -336,6 +338,7 @@
 				FA949845F7D124E8309BF34D /* EdgeTriggerService.swift */,
 				0375DABAD850F9752DE0161D /* LaunchAtLoginService.swift */,
 				C60A1B82D9C8A63B33110CF5 /* NotificationService.swift */,
+				3C8A0A6B0D8FA0C9DC421D26 /* PulseBrand.swift */,
 				D1201E56658CB51991670BEB /* PulseLocalization.swift */,
 				52CF40CEC1975FC095B8D1AF /* PulseSettings.swift */,
 				670E693E8025E2F5D80C7BC2 /* PulseTaskPresentation.swift */,
@@ -489,6 +492,7 @@
 				F6DD9A5EB80998DFDCBCA723 /* LaunchAtLoginService.swift in Sources */,
 				138B0296796E41AF5FBAB3A7 /* NotificationService.swift in Sources */,
 				97C0775AE5EC0837BB48EAF7 /* PluginEventJournalReader.swift in Sources */,
+				E8D9B15DC11601C2AB4A4640 /* PulseBrand.swift in Sources */,
 				919985520ADB6E8FDD6868F7 /* PulseLocalization.swift in Sources */,
 				A671B10BBB983B6336CEB523 /* PulseSettings.swift in Sources */,
 				BD855CE0E362D5005287DD5F /* PulseTask.swift in Sources */,
@@ -554,7 +558,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.zuuzii.GPTPulse;
 				PRODUCT_MODULE_NAME = GPTPulse;
-				PRODUCT_NAME = "GPT Pulse";
+				PRODUCT_NAME = "LLM Pulse";
 				SDKROOT = macosx;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -578,7 +582,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.zuuzii.GPTPulse;
 				PRODUCT_MODULE_NAME = GPTPulse;
-				PRODUCT_NAME = "GPT Pulse";
+				PRODUCT_NAME = "LLM Pulse";
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -721,7 +725,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.zuuzii.GPTPulseTests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GPT Pulse.app/Contents/MacOS/GPT Pulse";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LLM Pulse.app/Contents/MacOS/LLM Pulse";
 			};
 			name = Release;
 		};
@@ -738,7 +742,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.zuuzii.GPTPulseTests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/GPT Pulse.app/Contents/MacOS/GPT Pulse";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/LLM Pulse.app/Contents/MacOS/LLM Pulse";
 			};
 			name = Debug;
 		};

@@ -1,10 +1,10 @@
-# GPT Pulse 本地发布
+# LLM Pulse 本地发布
 
 `release.sh` 生成 macOS 14+ 的 Universal (`arm64` + `x86_64`) Release，并执行：
 
 1. 无签名构建，然后使用 `Developer ID Application`、hardened runtime 和 secure timestamp 手动签名。
 2. 将 App 打包为 ZIP 提交公证，等待 `Accepted`，再 staple App。
-3. 创建带 `GPT Pulse.app → Applications` 拖拽布局的压缩 DMG，并签名 DMG。
+3. 创建带 `LLM Pulse.app → Applications` 拖拽布局的压缩 DMG，并签名 DMG。
 4. 再次提交 DMG 公证，然后 staple DMG。
 5. 使用 `codesign`、`stapler`、`spctl`、`hdiutil` 和 `lipo` 验证最终 DMG 及其中的 App。
 6. 生成 `.sha256`，再用 Sparkle EdDSA key 为最终 staple 后的 DMG 生成 `appcast.xml`，并仅用 `SUPublicEDKey` 验证 enclosure 签名。
@@ -14,7 +14,7 @@
 ## 前置条件
 
 - Xcode Command Line Tools、XcodeGen 和有效的 `Developer ID Application` 证书。
-- 默认从仓库外的 `~/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key` 读取 Sparkle EdDSA 私钥；文件必须归当前用户所有、mode `0600`、只有一个 hard link，父目录必须为 mode `0700`，且公钥必须与 `Info.plist` 的 `SUPublicEDKey` 一致。
+- 为保持既有 Sparkle 更新信任链，默认继续从仓库外的旧文件名 `~/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key` 读取 Sparkle EdDSA 私钥；文件必须归当前用户所有、mode `0600`、只有一个 hard link，父目录必须为 mode `0700`，且公钥必须与 `Info.plist` 的 `SUPublicEDKey` 一致。
 - 需要创建全新的签名 key 时执行以下命令。脚本拒绝覆盖已有文件，只输出可公开的 `SUPublicEDKey`，不会输出私钥：
 
   ```bash
@@ -48,8 +48,8 @@ scripts/release.sh --team-id "<Team ID>"
 默认产物：
 
 ```text
-dist/GPT-Pulse-1.1.0.dmg
-dist/GPT-Pulse-1.1.0.dmg.sha256
+dist/LLM-Pulse-VERSION.dmg
+dist/LLM-Pulse-VERSION.dmg.sha256
 dist/appcast.xml
 ```
 

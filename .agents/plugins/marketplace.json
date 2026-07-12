@@ -1,7 +1,7 @@
 {
   "name": "gpt-pulse",
   "interface": {
-    "displayName": "GPT Pulse"
+    "displayName": "LLM Pulse"
   },
   "plugins": [
     {

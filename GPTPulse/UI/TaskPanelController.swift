@@ -189,7 +189,7 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.animationBehavior = .none
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.title = "GPT Pulse"
+        panel.title = PulseBrand.displayName
         updateLocalization(language: settings?.appLanguage ?? .system)
         languageCancellable = settings?.$appLanguage
             .dropFirst()
@@ -201,7 +201,7 @@ final class TaskPanelController: NSObject, NSWindowDelegate {
 
     private func updateLocalization(language: AppLanguage) {
         panel.setAccessibilityLabel(PulseL10n.text(
-            "GPT Pulse 任务侧边栏",
+            "LLM Pulse 任务侧边栏",
             language: language
         ))
     }

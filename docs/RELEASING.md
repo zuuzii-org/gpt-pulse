@@ -1,6 +1,6 @@
-# GPT Pulse 发布流程
+# LLM Pulse 发布流程
 
-本文档用于发布 GPT Pulse macOS 应用和配套的 Codex 插件。当前基准版本为 `1.3.0`，品牌署名统一使用 **Zuuzii**。
+本文档用于发布 LLM Pulse macOS 应用和配套的 Codex 插件。当前最新公开基准仍是旧品牌 **GPT Pulse v1.3.0**；LLM Pulse v2.0.0 是待发布目标，不得在完成全部门禁前表述为已发布。品牌署名统一使用 **Zuuzii**。
 
 ## 发布原则
 
@@ -17,10 +17,10 @@
 
 - macOS 与 Xcode 16+，已接受 Xcode License。
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)。
-- `gh` CLI，已登录且可向 `zuuzii-org/gpt-pulse` 推送 tag 和创建 Release。
+- `gh` CLI，已登录且可向 `zuuzii-org/llm-pulse` 推送 tag 和创建 Release。
 - 登录 Keychain 中可用的 Developer ID Application 证书。
 - Keychain 中名为 `GPTPulseNotary` 的 `notarytool` 凭据 profile。
-- 仓库外的 Sparkle EdDSA private-key 文件；默认路径为 `~/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key`。仓库只保存匹配的 public key。
+- 仓库外的 Sparkle EdDSA private-key 文件；为保持更新信任链兼容，默认路径继续使用旧文件名 `~/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key`。仓库只保存匹配的 public key。
 
 检查工具、身份与公证 profile：
 
@@ -33,6 +33,18 @@ xcrun notarytool history --keychain-profile "GPTPulseNotary" >/dev/null
 scripts/sparkle_key_tool.swift public-key \
   "$HOME/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key"
 ```
+
+### 改名后的兼容身份
+
+LLM Pulse 只修改用户可见品牌和 GitHub 仓库名。发布与升级流程必须继续保留以下技术身份：
+
+- Bundle ID：`com.zuuzii.GPTPulse`
+- `notarytool` profile：`GPTPulseNotary`
+- Application Support：`~/Library/Application Support/GPT Pulse/`
+- Sparkle private-key 文件：`~/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key`
+- Codex plugin ID：`gpt-pulse`
+
+仓库改名为 `zuuzii-org/llm-pulse` 后，必须验证旧 GitHub URL 重定向、固定 `appcast.xml` 下载地址和既有 Sparkle 更新链均可继续工作；不要生成新的 Bundle ID、插件 ID 或 Sparkle key。
 
 ### 凭据安全
 
@@ -51,7 +63,7 @@ scripts/sparkle_key_tool.swift public-key \
 ## 1. 锁定版本与源码
 
 ```bash
-export VERSION="1.3.0"
+export VERSION="2.0.0" # 待发布目标；执行前以 Info.plist 和插件 manifest 为准
 export TAG="v${VERSION}"
 export NOTARY_PROFILE="GPTPulseNotary"
 
@@ -90,7 +102,7 @@ umask 077
 1. 从当前 commit 生成 Xcode 工程并构建 Release Universal App。
 2. 签名 App 及其嵌套可执行文件，开启 Hardened Runtime。
 3. 将 App 提交 Apple 公证，等待 `Accepted`，然后对 App staple。
-4. 生成只包含 `GPT Pulse.app → Applications` 的拖拽安装 DMG。
+4. 生成只包含 `LLM Pulse.app → Applications` 的拖拽安装 DMG。
 5. 签名 DMG，提交公证，等待 `Accepted`，然后对 DMG staple。
 6. 输出 SHA-256 校验文件。
 7. 从最终 staple 后的 DMG 生成 `appcast.xml`，验证版本、URL、长度与 Sparkle EdDSA 签名。
@@ -98,8 +110,8 @@ umask 077
 预期产物：
 
 ```text
-dist/GPT-Pulse-1.3.0.dmg
-dist/GPT-Pulse-1.3.0.dmg.sha256
+dist/LLM-Pulse-2.0.0.dmg
+dist/LLM-Pulse-2.0.0.dmg.sha256
 dist/appcast.xml
 ```
 
@@ -121,14 +133,14 @@ xcrun notarytool log "<submission-id>" \
 先验证校验和 DMG 本体：
 
 ```bash
-DMG="dist/GPT-Pulse-${VERSION}.dmg"
+DMG="dist/LLM-Pulse-${VERSION}.dmg"
 CHECKSUM="${DMG}.sha256"
 APPCAST="dist/appcast.xml"
 
 test -f "$DMG"
 test -f "$CHECKSUM"
 test -f "$APPCAST"
-(cd dist && shasum -a 256 -c "GPT-Pulse-${VERSION}.dmg.sha256")
+(cd dist && shasum -a 256 -c "LLM-Pulse-${VERSION}.dmg.sha256")
 
 codesign --verify --strict --verbose=2 "$DMG"
 xcrun stapler validate "$DMG"
@@ -141,14 +153,14 @@ xmllint --noout "$APPCAST"
 ```bash
 MOUNT_POINT="$(mktemp -d)"
 hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG"
-APP="$MOUNT_POINT/GPT Pulse.app"
+APP="$MOUNT_POINT/LLM Pulse.app"
 
 codesign --verify --deep --strict --verbose=2 "$APP"
 xcrun stapler validate "$APP"
 spctl --assess --type execute -vv "$APP"
 test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION"
-test "$(lipo -archs "$APP/Contents/MacOS/GPT Pulse")" = "x86_64 arm64" || \
-  test "$(lipo -archs "$APP/Contents/MacOS/GPT Pulse")" = "arm64 x86_64"
+test "$(lipo -archs "$APP/Contents/MacOS/LLM Pulse")" = "x86_64 arm64" || \
+  test "$(lipo -archs "$APP/Contents/MacOS/LLM Pulse")" = "arm64 x86_64"
 
 hdiutil detach "$MOUNT_POINT"
 rmdir "$MOUNT_POINT"
@@ -173,15 +185,15 @@ rmdir "$MOUNT_POINT"
 ```bash
 git status --short
 git push origin main
-git tag -a "$TAG" -m "GPT Pulse ${TAG}"
+git tag -a "$TAG" -m "LLM Pulse ${TAG}"
 git push origin "$TAG"
 
 gh release create "$TAG" \
-  "dist/GPT-Pulse-${VERSION}.dmg" \
-  "dist/GPT-Pulse-${VERSION}.dmg.sha256" \
+  "dist/LLM-Pulse-${VERSION}.dmg" \
+  "dist/LLM-Pulse-${VERSION}.dmg.sha256" \
   "dist/appcast.xml" \
-  --repo zuuzii-org/gpt-pulse \
-  --title "GPT Pulse ${TAG}" \
+  --repo zuuzii-org/llm-pulse \
+  --title "LLM Pulse ${TAG}" \
   --notes-file "docs/release-notes-v${VERSION}.md" \
   --verify-tag \
   --draft
@@ -191,7 +203,7 @@ gh release create "$TAG" \
 
 ```bash
 gh release view "$TAG" \
-  --repo zuuzii-org/gpt-pulse \
+  --repo zuuzii-org/llm-pulse \
   --json isDraft,tagName,targetCommitish,url,assets
 ```
 
@@ -202,21 +214,21 @@ gh release view "$TAG" \
 ```bash
 VERIFY_DIR="$(mktemp -d)"
 gh release download "$TAG" \
-  --repo zuuzii-org/gpt-pulse \
+  --repo zuuzii-org/llm-pulse \
   --dir "$VERIFY_DIR"
 
-(cd "$VERIFY_DIR" && shasum -a 256 -c "GPT-Pulse-${VERSION}.dmg.sha256")
+(cd "$VERIFY_DIR" && shasum -a 256 -c "LLM-Pulse-${VERSION}.dmg.sha256")
 xmllint --noout "$VERIFY_DIR/appcast.xml"
-xcrun stapler validate "$VERIFY_DIR/GPT-Pulse-${VERSION}.dmg"
+xcrun stapler validate "$VERIFY_DIR/LLM-Pulse-${VERSION}.dmg"
 spctl --assess --type open --context context:primary-signature -vv \
-  "$VERIFY_DIR/GPT-Pulse-${VERSION}.dmg"
+  "$VERIFY_DIR/LLM-Pulse-${VERSION}.dmg"
 ```
 
 验证 Release Notes 的中英文内容、版本号、兼容性、已知限制和 SHA-256 附件都正确后，再公开：
 
 ```bash
 gh release edit "$TAG" \
-  --repo zuuzii-org/gpt-pulse \
+  --repo zuuzii-org/llm-pulse \
   --draft=false \
   --latest
 ```
@@ -224,7 +236,7 @@ gh release edit "$TAG" \
 公开后确认固定 feed 已切换到新版本，再从 Release 页下载一次 DMG，执行安装与首次启动烟雾测试：
 
 ```bash
-curl -fL "https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml" \
+curl -fL "https://github.com/zuuzii-org/llm-pulse/releases/latest/download/appcast.xml" \
   -o "$VERIFY_DIR/latest-appcast.xml"
 cmp "$VERIFY_DIR/appcast.xml" "$VERIFY_DIR/latest-appcast.xml"
 ```
@@ -246,7 +258,7 @@ git tag -d "$TAG"
 只在确认从未对外公开、无人依赖该 tag 时，才可删除 Draft 和 tag：
 
 ```bash
-gh release delete "$TAG" --repo zuuzii-org/gpt-pulse --yes
+gh release delete "$TAG" --repo zuuzii-org/llm-pulse --yes
 git push origin --delete "$TAG"
 git tag -d "$TAG"
 ```
@@ -261,7 +273,7 @@ git tag -d "$TAG"
 2. 严重问题可删除 GitHub Release 以停止分发，但保留 Git tag 作为已发生的历史：
 
    ```bash
-   gh release delete "$TAG" --repo zuuzii-org/gpt-pulse --yes
+   gh release delete "$TAG" --repo zuuzii-org/llm-pulse --yes
    ```
 
 3. 修复后以更高的 patch 版本（例如 `v0.1.1`）重新签名、公证和发布。

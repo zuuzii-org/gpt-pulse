@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# GPT Pulse observes Codex lifecycle events without changing hook decisions.
+# LLM Pulse observes Codex lifecycle events without changing hook decisions.
 # This wrapper intentionally depends only on tools bundled with macOS.
 
 record_event() {

@@ -102,7 +102,7 @@ struct SettingsView: View {
             }
 
             Section("系统") {
-                Toggle("登录时启动 GPT Pulse", isOn: launchAtLoginBinding)
+                Toggle("登录时启动 LLM Pulse", isOn: launchAtLoginBinding)
 
                 if launchAtLogin.requiresApproval {
                     HStack(alignment: .firstTextBaseline) {
@@ -123,7 +123,7 @@ struct SettingsView: View {
             }
 
             Section("隐私") {
-                Text("V1 只读取本机 Codex 桌面版任务数据。GPT Pulse 仅写入自己的未查看状态与偏好设置，不修改 Codex 任务记录。")
+                Text("V1 只读取本机 Codex 桌面版任务数据。LLM Pulse 仅写入自己的未查看状态与偏好设置，不修改 Codex 任务记录。")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -131,7 +131,7 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(minWidth: 540, idealWidth: 580, minHeight: 560, idealHeight: 600)
         .navigationTitle(PulseL10n.text(
-            "GPT Pulse 设置",
+            "LLM Pulse 设置",
             language: settings.appLanguage
         ))
         .environment(\.locale, settings.appLanguage.locale)

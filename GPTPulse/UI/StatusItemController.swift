@@ -79,9 +79,9 @@ struct StatusItemPresentation: Equatable {
             components.append(PulseL10n.text("存在失败", language: language))
         }
         if language.usesChinesePunctuation {
-            return "GPT Pulse，" + components.joined(separator: "，")
+            return "\(PulseBrand.displayName)，" + components.joined(separator: "，")
         }
-        return "GPT Pulse · " + components.joined(separator: " · ")
+        return "\(PulseBrand.displayName) · " + components.joined(separator: " · ")
     }
 
     var toolTip: String {
@@ -99,7 +99,7 @@ struct StatusItemPresentation: Equatable {
         if hasFailures {
             components.append(PulseL10n.text("存在失败", language: language))
         }
-        return "GPT Pulse · " + components.joined(separator: " · ")
+        return "\(PulseBrand.displayName) · " + components.joined(separator: " · ")
     }
 
     private static func compactCount(_ count: Int) -> String {
@@ -258,7 +258,7 @@ final class StatusItemController: NSObject {
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
-            title: PulseL10n.text("退出 GPT Pulse", language: language),
+            title: PulseL10n.text("退出 LLM Pulse", language: language),
             action: #selector(quit),
             keyEquivalent: "q"
         )

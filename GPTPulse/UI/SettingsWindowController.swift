@@ -20,7 +20,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let hostingController = NSHostingController(rootView: rootView)
         let window = NSWindow(contentViewController: hostingController)
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.title = PulseL10n.text("GPT Pulse 设置", language: settings.appLanguage)
+        window.title = PulseL10n.text("LLM Pulse 设置", language: settings.appLanguage)
         window.setContentSize(NSSize(width: 580, height: 600))
         window.contentMinSize = NSSize(width: 540, height: 560)
         window.isReleasedWhenClosed = false
@@ -33,7 +33,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak window] language in
-                window?.title = PulseL10n.text("GPT Pulse 设置", language: language)
+                window?.title = PulseL10n.text("LLM Pulse 设置", language: language)
             }
     }
 

@@ -21,7 +21,10 @@ struct CodexPaths: Sendable {
         }
 
         let applicationSupport = homeDirectory
-            .appendingPathComponent("Library/Application Support/GPT Pulse", isDirectory: true)
+            .appendingPathComponent(
+                "Library/Application Support/\(PulseBrand.legacyApplicationSupportDirectoryName)",
+                isDirectory: true
+            )
 
         let stateDatabaseCandidates = discoverStateDatabases(in: codexHome)
 

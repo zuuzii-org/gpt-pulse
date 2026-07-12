@@ -245,7 +245,7 @@ struct TaskSidebarView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("GPT Pulse")
+                Text(PulseBrand.displayName)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .tracking(-0.35)
 
@@ -554,7 +554,7 @@ struct TaskSidebarView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("打开 GPT Pulse 设置")
+            .help("打开 LLM Pulse 设置")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)

@@ -297,8 +297,8 @@ private final class CodexAppServerSession {
                 "id": requestID,
                 "params": [
                     "clientInfo": [
-                        "name": "gpt-pulse",
-                        "title": "GPT Pulse",
+                        "name": PulseBrand.technicalIdentifier,
+                        "title": PulseBrand.displayName,
                         "version": Self.applicationVersion,
                     ],
                 ],

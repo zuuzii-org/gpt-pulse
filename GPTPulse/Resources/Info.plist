@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>GPT Pulse</string>
+	<string>LLM Pulse</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -33,7 +33,7 @@
 	<key>NSUserNotificationAlertStyle</key>
 	<string>alert</string>
 	<key>SUFeedURL</key>
-	<string>https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/zuuzii-org/llm-pulse/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>EGsMP5a2O3jD5mAuLHfkOx8S5z9GchRjuhIuwldAzdQ=</string>
 	<key>SUVerifyUpdateBeforeExtraction</key>

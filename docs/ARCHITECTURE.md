@@ -1,4 +1,4 @@
-# GPT Pulse V1 架构
+# LLM Pulse V1 架构
 
 ## 目标
 
@@ -6,17 +6,17 @@ V1 面向单机、单用户的 Codex Desktop。核心约束是：实时状态尽
 
 ## 数据流
 
-1. `AppServerCapabilityProbe` 首先检查 Codex managed control socket。只有现有 socket 可连接时才允许进入协议适配；GPT Pulse 不负责启动 daemon。
+1. `AppServerCapabilityProbe` 首先检查 Codex managed control socket。只有现有 socket 可连接时才允许进入协议适配；LLM Pulse 不负责启动 daemon。
 2. `PluginEventJournal` 读取插件 hooks 产生的最小化 lifecycle 事件，用于补充运行中与等待授权状态。
 3. `CodexSQLiteTaskAdapter` 以 read-only 模式读取 thread 元数据与可选的 `tokens_used` 总量。
 4. `RolloutTaskAdapter` 解析 rollout 的状态、累计 token 汇总与 rate-limit 快照，并以 `session_meta.originator == "Codex Desktop"` 做最终桌面来源校验。
 5. `CodexAgentActivityObserver` 以 SQLite 父子图定位根任务的全部后代，再用各自 rollout 的生命周期重建活跃状态。
-6. `ReceiptStore` 只在 GPT Pulse 自有数据库中保存完成 turn 的已查看回执。
+6. `ReceiptStore` 只在 LLM Pulse 自有数据库中保存完成 turn 的已查看回执。
 7. `TaskRepository` 合并上述数据并生成 UI 所需的 `TaskSnapshot`。
 
 ## 状态归并
 
-| 输入证据 | GPT Pulse 状态 |
+| 输入证据 | LLM Pulse 状态 |
 | --- | --- |
 | `PermissionRequest` | `waitingForApproval` |
 | 未匹配的 `request_user_input` call/output | `waitingForAnswer` |
@@ -45,10 +45,10 @@ V1 面向单机、单用户的 Codex Desktop。核心约束是：实时状态尽
 
 - 回执主键为 `thread_id + turn_id`，同一任务再次运行并完成后会产生新的未查看项。
 - 首次启动建立时间基线，不把历史完成任务批量标为未查看。
-- 从 GPT Pulse 成功打开任务或点击手动勾选后写入回执。
-- “全部已查看”在单一 SQLite 事务中批量写入；撤销只删除该批 GPT Pulse 回执，不接触 Codex 数据。
+- 从 LLM Pulse 成功打开任务或点击手动勾选后写入回执。
+- “全部已查看”在单一 SQLite 事务中批量写入；撤销只删除该批 LLM Pulse 回执，不接触 Codex 数据。
 - 已完成、失败和中断任务统一保留 24 小时，最多展示 20 条；未查看的成功任务优先进入保留集合。
-- 标记已查看只更新 GPT Pulse 自有回执，任务仍会留在“最近完成”中直至超出保留窗口。
+- 标记已查看只更新 LLM Pulse 自有回执，任务仍会留在“最近完成”中直至超出保留窗口。
 
 ## Token 与配额语义
 
@@ -70,13 +70,13 @@ V1 面向单机、单用户的 Codex Desktop。核心约束是：实时状态尽
 - 5h / weekly 分别使用各自 `observedAt` 判断 15 分钟新鲜度；剩余 20%、10%、5% 分级提醒，去重键由 `plan_type + window_minutes + resets_at + threshold` 构成并持久化。
 - 通知权限请求期间或 Notification Center 临时投递失败时，只要任务状态仍有效，就按最高 5 分钟的封顶退避持续重试；adapter 部分或全部暂时不可用时保留缺失任务的上一状态，避免恢复后重复或漏发通知。
 - “稍后提醒”每 30 秒与当前任务状态、通知档位、项目静音、额度 plan 和 reset window 对账；rollout 部分或全部暂时不可用时保守保留，条件失效后删除。额度同一 reset window 内的用量单调，因此不会仅因 telemetry 超过 15 分钟而提前删除 1 小时提醒。
-- 通知动作只允许打开 Codex、打开 GPT Pulse、稍后提醒或写入 GPT Pulse 自有已查看回执；不批准权限、不回答问题、不停止或重试任务。
+- 通知动作只允许打开 Codex、打开 LLM Pulse、稍后提醒或写入 LLM Pulse 自有已查看回执；不批准权限、不回答问题、不停止或重试任务。
 
 ## macOS 宿主
 
 - `NSStatusItem` 承载固定图标区与双行计数；右键菜单的“检查更新…”只调用 Sparkle 标准 updater，不改变任务状态。
 - 自定义 `NSPanel` 承载 400px 侧边栏，并通过 SwiftUI 构建内容。
-- “正在运行 / 最近完成”使用独立 disclosure；展开状态写入 GPT Pulse 自有 `UserDefaults`，折叠组不进入键盘焦点顺序，也不清空任务行的 token 明细展开状态。
+- “正在运行 / 最近完成”使用独立 disclosure；展开状态写入 LLM Pulse 自有 `UserDefaults`，折叠组不进入键盘焦点顺序，也不清空任务行的 token 明细展开状态。
 - 面板展示来源分为 `statusItemClick`、`edgeHover` 与 `programmatic`。状态栏点击先提供 5 秒移入保护；一旦进入面板即转为 hover hold，离开后沿用 0.3 秒防抖。Timer 以递增 token 隔离，旧回调不得关闭新一轮展示。
 - 轻量轮询 `NSEvent.mouseLocation`，仅在右侧中间 60% 连续停留 200ms 后触发。
 - 触边计算使用显示器全局几何；相邻显示器覆盖的右边缘不视为可触发边缘。
@@ -93,3 +93,5 @@ V1 面向单机、单用户的 Codex Desktop。核心约束是：实时状态尽
 ## 兼容策略
 
 所有 Codex 输入均通过 adapter 隔离。SQLite 表、JSONL 事件或深链发生变化时，对应 adapter 应进入 degraded/unavailable 状态，其他 adapter 继续工作；不允许通过写入、migration 或修复 Codex 文件来恢复兼容。
+
+品牌迁移到 LLM Pulse 时，用户可见名称与仓库地址可以更新，但技术身份继续保留：Bundle ID 为 `com.zuuzii.GPTPulse`，Application Support 路径为 `~/Library/Application Support/GPT Pulse/`，公证 profile 为 `GPTPulseNotary`，Sparkle private-key 文件继续使用旧文件名 `GPT Pulse Sparkle Ed25519.key`，Codex plugin ID 继续使用 `gpt-pulse`。这些值属于升级兼容合同，不是待清理的品牌文案。

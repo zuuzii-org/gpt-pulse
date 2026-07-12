@@ -503,7 +503,7 @@ final class NotificationService {
         )
         let openPanel = UNNotificationAction(
             identifier: PulseNotificationAction.openPanel,
-            title: PulseL10n.text("打开 GPT Pulse", language: language),
+            title: PulseL10n.text("打开 LLM Pulse", language: language),
             options: [.foreground]
         )
         let snooze15 = UNNotificationAction(

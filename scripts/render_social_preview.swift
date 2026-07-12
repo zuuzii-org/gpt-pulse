@@ -90,14 +90,14 @@ func draw(_ text: String, at point: NSPoint, size: CGFloat, weight: NSFont.Weigh
 }
 
 draw(
-    "GPT Pulse",
+    "LLM Pulse",
     at: NSPoint(x: 540, y: 350),
     size: 76,
     weight: .semibold,
     color: .white
 )
 draw(
-    "Codex tasks, always in sight.",
+    "AI coding tasks, always in sight.",
     at: NSPoint(x: 545, y: 292),
     size: 31,
     weight: .medium,

@@ -481,7 +481,7 @@ private func renderPreview(
     }
 
     context.textMatrix = .identity
-    drawPreviewLabel("GPT Pulse", centerX: 160, in: context)
+    drawPreviewLabel("LLM Pulse", centerX: 160, in: context)
     drawPreviewLabel("Applications", centerX: 480, in: context)
     context.restoreGState()
 

@@ -1,7 +1,7 @@
 {
   "name": "gpt-pulse",
   "version": "1.3.0",
-  "description": "Privacy-minimized Codex lifecycle events for the GPT Pulse macOS companion app.",
+  "description": "Privacy-minimized Codex lifecycle events for the LLM Pulse macOS companion app.",
   "author": {
     "name": "Zuuzii"
   },
@@ -13,16 +13,16 @@
     "productivity"
   ],
   "interface": {
-    "displayName": "GPT Pulse",
-    "shortDescription": "Read-only Codex task activity for GPT Pulse.",
-    "longDescription": "Publishes a privacy-minimized lifecycle event journal for the GPT Pulse macOS companion app without modifying Codex task data.",
+    "displayName": "LLM Pulse",
+    "shortDescription": "Read-only Codex task activity for LLM Pulse.",
+    "longDescription": "Publishes a privacy-minimized lifecycle event journal for the LLM Pulse macOS companion app without modifying Codex task data.",
     "developerName": "Zuuzii",
     "category": "Productivity",
     "capabilities": [
       "Read"
     ],
     "defaultPrompt": [
-      "Show my Codex desktop task activity in GPT Pulse."
+      "Show my Codex desktop task activity in LLM Pulse."
     ]
   }
 }

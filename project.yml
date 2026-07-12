@@ -35,7 +35,7 @@ targets:
           - Resources/Info.plist
     settings:
       base:
-        PRODUCT_NAME: GPT Pulse
+        PRODUCT_NAME: LLM Pulse
         PRODUCT_MODULE_NAME: GPTPulse
         PRODUCT_BUNDLE_IDENTIFIER: com.zuuzii.GPTPulse
         INFOPLIST_FILE: GPTPulse/Resources/Info.plist
@@ -67,7 +67,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zuuzii.GPTPulseTests
         GENERATE_INFOPLIST_FILE: YES
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/GPT Pulse.app/Contents/MacOS/GPT Pulse"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LLM Pulse.app/Contents/MacOS/LLM Pulse"
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: GPTPulse

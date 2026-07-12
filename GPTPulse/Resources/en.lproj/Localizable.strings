@@ -30,22 +30,22 @@
 "全部取消静音" = "Unmute All";
 
 "系统" = "System";
-"登录时启动 GPT Pulse" = "Launch GPT Pulse at login";
+"登录时启动 LLM Pulse" = "Launch LLM Pulse at login";
 "需要在系统设置中允许登录项。" = "Allow the login item in System Settings.";
 "打开系统设置" = "Open System Settings";
 "隐私" = "Privacy";
-"V1 只读取本机 Codex 桌面版任务数据。GPT Pulse 仅写入自己的未查看状态与偏好设置，不修改 Codex 任务记录。" = "V1 reads only local Codex Desktop task data. GPT Pulse writes only its own unread state and preferences, and never modifies Codex task records.";
-"GPT Pulse 设置" = "GPT Pulse Settings";
+"V1 只读取本机 Codex 桌面版任务数据。LLM Pulse 仅写入自己的未查看状态与偏好设置，不修改 Codex 任务记录。" = "V1 reads only local Codex Desktop task data. LLM Pulse writes only its own unread state and preferences, and never modifies Codex task records.";
+"LLM Pulse 设置" = "LLM Pulse Settings";
 
 "打开下一条需处理任务" = "Open Next Action-Required Task";
 "打开任务面板" = "Open Task Panel";
 "立即刷新" = "Refresh Now";
 "检查更新…" = "Check for Updates…";
 "设置…" = "Settings…";
-"退出 GPT Pulse" = "Quit GPT Pulse";
+"退出 LLM Pulse" = "Quit LLM Pulse";
 "左键显示或隐藏任务面板；右键或“打开更多选项”操作显示菜单。" = "Left-click to show or hide the task panel. Right-click or use Open More Options to show the menu.";
 "打开更多选项" = "Open More Options";
-"GPT Pulse 任务侧边栏" = "GPT Pulse Task Sidebar";
+"LLM Pulse 任务侧边栏" = "LLM Pulse Task Sidebar";
 
 "处理下一条等待授权或回答的任务" = "Open the next task waiting for approval or an answer";
 "需要你处理 %d 个任务，打开下一条" = "%d tasks need your attention. Open the next one.";
@@ -67,7 +67,7 @@
 "暂时无法读取任务" = "Tasks are temporarily unavailable";
 "重试" = "Retry";
 "设置" = "Settings";
-"打开 GPT Pulse 设置" = "Open GPT Pulse Settings";
+"打开 LLM Pulse 设置" = "Open LLM Pulse Settings";
 "已将 %d 个任务标记为已查看" = "Marked %d tasks as viewed";
 "正在更新已查看状态" = "Updating viewed state";
 "撤销" = "Undo";
@@ -181,7 +181,7 @@
 "低于 %d%% 提醒阈值" = "Below the %d%% alert threshold";
 "将在 %@ 重置。" = "Resets %@.";
 "在 Codex 中打开" = "Open in Codex";
-"打开 GPT Pulse" = "Open GPT Pulse";
+"打开 LLM Pulse" = "Open LLM Pulse";
 "15 分钟后提醒" = "Remind Me in 15 Minutes";
 "1 小时后提醒" = "Remind Me in 1 Hour";
 "本周" = "Weekly";

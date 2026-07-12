@@ -98,8 +98,14 @@ final class StatusItemPresentationTests: XCTestCase {
 
     func testSparkleUsesStableReleaseFeedAndValidEdDSAKey() throws {
         XCTAssertEqual(
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String,
+            PulseBrand.displayName
+        )
+        XCTAssertEqual(Bundle.main.bundleIdentifier, PulseBrand.bundleIdentifier)
+        XCTAssertEqual(PulseBrand.repositorySlug, "zuuzii-org/llm-pulse")
+        XCTAssertEqual(
             Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String,
-            "https://github.com/zuuzii-org/gpt-pulse/releases/latest/download/appcast.xml"
+            PulseBrand.updateFeedURL.absoluteString
         )
         XCTAssertEqual(
             Bundle.main.object(forInfoDictionaryKey: "SUVerifyUpdateBeforeExtraction") as? Bool,
@@ -522,11 +528,11 @@ final class StatusItemPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.indicatorState, .waitingAction)
         XCTAssertEqual(
             presentation.accessibilityLabel,
-            "GPT Pulse，正在运行 3 个任务，最近完成 1 个任务，需要你处理 2 个任务"
+            "LLM Pulse，正在运行 3 个任务，最近完成 1 个任务，需要你处理 2 个任务"
         )
         XCTAssertEqual(
             presentation.toolTip,
-            "GPT Pulse · 正在运行 3 · 最近完成 1 · 需要你处理 2"
+            "LLM Pulse · 正在运行 3 · 最近完成 1 · 需要你处理 2"
         )
     }
 
