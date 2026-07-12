@@ -102,7 +102,7 @@ umask 077
 1. 从当前 commit 生成 Xcode 工程并构建 Release Universal App。
 2. 签名 App 及其嵌套可执行文件，开启 Hardened Runtime。
 3. 将 App 提交 Apple 公证，等待 `Accepted`，然后对 App staple。
-4. 生成只包含 `LLM Pulse.app → Applications` 的拖拽安装 DMG。
+4. 生成只包含 `GPT Pulse.app → Applications` 的拖拽安装 DMG。v1.4.0 是品牌迁移桥接版本，磁盘 wrapper 暂时沿用旧名以确保 Sparkle 与 Finder 原位覆盖；App 内显示名仍为 LLM Pulse。
 5. 签名 DMG，提交公证，等待 `Accepted`，然后对 DMG staple。
 6. 输出 SHA-256 校验文件。
 7. 从最终 staple 后的 DMG 生成 `appcast.xml`，验证版本、URL、长度与 Sparkle EdDSA 签名。
@@ -153,7 +153,7 @@ xmllint --noout "$APPCAST"
 ```bash
 MOUNT_POINT="$(mktemp -d)"
 hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_POINT" "$DMG"
-APP="$MOUNT_POINT/LLM Pulse.app"
+APP="$MOUNT_POINT/GPT Pulse.app"
 
 codesign --verify --deep --strict --verbose=2 "$APP"
 xcrun stapler validate "$APP"

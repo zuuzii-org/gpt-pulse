@@ -100,7 +100,7 @@ LLM Pulse 的设计边界是只读观察：
 
 1. 从 [GitHub Releases](https://github.com/zuuzii-org/llm-pulse/releases/latest) 下载 DMG 和对应的 SHA-256 文件。
 2. 使用上面的命令验证校验和。
-3. 打开 DMG，将 `LLM Pulse.app` 拖入 `Applications`。
+3. 打开 DMG，将 `GPT Pulse.app` 拖入 `Applications`。v1.4.0 仅在这一兼容过渡版本中保留旧的磁盘文件名，确保 Sparkle 与 Finder 都能原位覆盖现有安装；启动后显示的产品名称为 **LLM Pulse**。
 4. 从 `Applications` 启动应用。通知权限是可选的，不授权也能在本机监控任务。
 5. 如果需要，可在 LLM Pulse 设置中开启开机启动。
 

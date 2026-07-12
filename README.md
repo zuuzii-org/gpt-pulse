@@ -100,7 +100,7 @@ An optional update check reads the public release information hosted on GitHub. 
 
 1. Download the DMG and matching SHA-256 file from [GitHub Releases](https://github.com/zuuzii-org/llm-pulse/releases/latest).
 2. Verify the checksum with the command above.
-3. Open the DMG and drag `LLM Pulse.app` to `Applications`.
+3. Open the DMG and drag `GPT Pulse.app` to `Applications`. v1.4.0 keeps this legacy on-disk wrapper name for one compatibility release so both Sparkle and Finder replace existing installations cleanly; the product shown after launch is **LLM Pulse**.
 4. Launch the app from `Applications`. Notification permission is optional; local task monitoring works without it.
 5. Enable launch at login in LLM Pulse settings if desired.
 

@@ -4,7 +4,7 @@
 
 1. 无签名构建，然后使用 `Developer ID Application`、hardened runtime 和 secure timestamp 手动签名。
 2. 将 App 打包为 ZIP 提交公证，等待 `Accepted`，再 staple App。
-3. 创建带 `LLM Pulse.app → Applications` 拖拽布局的压缩 DMG，并签名 DMG。
+3. 创建带 `GPT Pulse.app → Applications` 拖拽布局的压缩 DMG，并签名 DMG。v1.4.0 暂时保留旧 wrapper 文件名以保证 Sparkle 与 Finder 原位覆盖，App 内显示名仍为 LLM Pulse。
 4. 再次提交 DMG 公证，然后 staple DMG。
 5. 使用 `codesign`、`stapler`、`spctl`、`hdiutil` 和 `lipo` 验证最终 DMG 及其中的 App。
 6. 生成 `.sha256`，再用 Sparkle EdDSA key 为最终 staple 后的 DMG 生成 `appcast.xml`，并仅用 `SUPublicEDKey` 验证 enclosure 签名。

@@ -9,6 +9,7 @@ readonly PROJECT_FILE="$REPO_ROOT/GPTPulse.xcodeproj"
 readonly PROJECT_SPEC="$REPO_ROOT/project.yml"
 readonly INFO_PLIST="$REPO_ROOT/GPTPulse/Resources/Info.plist"
 readonly APP_NAME="LLM Pulse.app"
+readonly DISTRIBUTED_APP_NAME="GPT Pulse.app"
 readonly APP_EXECUTABLE="LLM Pulse"
 readonly SCHEME="GPTPulse"
 readonly VOLUME_NAME="LLM Pulse"
@@ -839,7 +840,7 @@ apply_finder_layout() {
     return
   fi
 
-  /usr/bin/osascript - "$MOUNT_DIR" "$APP_NAME" "$background_name" <<'APPLESCRIPT'
+  /usr/bin/osascript - "$MOUNT_DIR" "$DISTRIBUTED_APP_NAME" "$background_name" <<'APPLESCRIPT'
 on run argv
   set mountPath to item 1 of argv
   set applicationName to item 2 of argv
@@ -918,7 +919,10 @@ create_and_sign_dmg() {
     MOUNTED=1
   fi
 
-  run /usr/bin/ditto --rsrc --extattr "$APP_PATH" "$MOUNT_DIR/$APP_NAME"
+  # v1.4.0 is a bridge release: keep the on-disk wrapper name used by existing
+  # installations so both Sparkle and Finder replace GPT Pulse.app atomically.
+  # The signed bundle contents and all user-facing product strings remain LLM Pulse.
+  run /usr/bin/ditto --rsrc --extattr "$APP_PATH" "$MOUNT_DIR/$DISTRIBUTED_APP_NAME"
   run /bin/ln -s /Applications "$MOUNT_DIR/Applications"
 
   if [[ -n "$BACKGROUND_PATH" ]]; then
@@ -1109,7 +1113,7 @@ generate_and_verify_appcast() {
 }
 
 verify_final_release() {
-  local mounted_app="$MOUNT_DIR/$APP_NAME"
+  local mounted_app="$MOUNT_DIR/$DISTRIBUTED_APP_NAME"
   local getfileinfo_path volume_attributes
   log "performing final offline verification"
   require_clean_worktree
