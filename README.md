@@ -42,17 +42,17 @@ The app interface supports English and Simplified Chinese. Choose Follow System,
 
 ## Download
 
-[Download the latest signed and notarized DMG](https://github.com/zuuzii-org/llm-pulse/releases/latest). The latest published build is **GPT Pulse v1.3.0**, released under the previous product name. It requires macOS 14 or later and ships as a Universal App for Apple Silicon and Intel Macs. **LLM Pulse v2.0.0 is the next planned release and has not been published yet.**
+[Download the latest signed and notarized DMG](https://github.com/zuuzii-org/llm-pulse/releases/latest). **LLM Pulse v1.4.0** requires macOS 14 or later and ships as a Universal App for Apple Silicon and Intel Macs. Claude Code and Qwen3.7 support remains planned for v2.0.0.
 
-The legacy-branded v1.3.0 release assets are:
+The v1.4.0 release assets are:
 
-- `GPT-Pulse-1.3.0.dmg`
-- `GPT-Pulse-1.3.0.dmg.sha256`
+- `LLM-Pulse-1.4.0.dmg`
+- `LLM-Pulse-1.4.0.dmg.sha256`
 
 To verify the download, place both files in the same folder and run:
 
 ```bash
-shasum -a 256 -c GPT-Pulse-1.3.0.dmg.sha256
+shasum -a 256 -c LLM-Pulse-1.4.0.dmg.sha256
 ```
 
 If you are using v1.0.0, install v1.1.0 manually once. v1.0.0 did not include in-app updates, so it cannot discover the update channel. From v1.1.0 onward, right-click the menu bar item and choose `检查更新…` (“Check for Updates…”) to update in place.
@@ -100,7 +100,7 @@ An optional update check reads the public release information hosted on GitHub. 
 
 1. Download the DMG and matching SHA-256 file from [GitHub Releases](https://github.com/zuuzii-org/llm-pulse/releases/latest).
 2. Verify the checksum with the command above.
-3. Open the current v1.3.0 DMG and drag the legacy-named `GPT Pulse.app` to `Applications`.
+3. Open the DMG and drag `LLM Pulse.app` to `Applications`.
 4. Launch the app from `Applications`. Notification permission is optional; local task monitoring works without it.
 5. Enable launch at login in LLM Pulse settings if desired.
 
@@ -115,7 +115,7 @@ v1.1.0 is the bootstrap release for this update channel. Users on v1.0.0 must do
 The app works without the plugin by falling back to read-only SQLite and rollout JSONL. Installing the bundled lifecycle hooks improves the timeliness of running and approval-waiting states.
 
 ```bash
-codex plugin marketplace add zuuzii-org/llm-pulse --ref v1.3.0
+codex plugin marketplace add zuuzii-org/llm-pulse --ref v1.4.0
 codex plugin add gpt-pulse@gpt-pulse
 ```
 
@@ -175,7 +175,7 @@ No. Install v1.1.0 manually once to add the in-app update channel. From v1.1.0 o
 
 ### Does LLM Pulse support Codex CLI, IDE tasks, cloud tasks, or other AI coding tools?
 
-The currently published v1.3.0 release only supports root tasks created by Codex Desktop on the local Mac. Claude Code and Qwen3.7 support is planned for LLM Pulse v2.0.0; see the [v2 implementation plan](docs/LLM_PULSE_V2_PLAN.md). v2.0.0 has not been published yet.
+The current v1.4.0 release supports root tasks created by Codex Desktop on the local Mac. Claude Code and Qwen3.7 support is planned for LLM Pulse v2.0.0; see the [v2 implementation plan](docs/LLM_PULSE_V2_PLAN.md). v2.0.0 has not been published yet.
 
 ### Is LLM Pulse an official OpenAI product?
 
