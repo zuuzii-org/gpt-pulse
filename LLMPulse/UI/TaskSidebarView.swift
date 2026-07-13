@@ -1822,7 +1822,7 @@ private struct TaskGroupDescriptor {
     static let running = TaskGroupDescriptor(
         id: "running",
         title: "正在运行",
-        color: .blue,
+        color: TaskSidebarPalette.runningInk,
         emptyMessage: "没有正在运行或等待操作的任务"
     )
 
@@ -1832,6 +1832,13 @@ private struct TaskGroupDescriptor {
         color: .green,
         emptyMessage: "还没有最近完成的任务"
     )
+}
+
+private enum TaskSidebarPalette {
+    // `Color.blue` is close to the minimum readable contrast on the sidebar's
+    // dark material. This brighter ink preserves the running-state blue while
+    // keeping project names and status text legible at caption sizes.
+    static let runningInk = Color(red: 0.32, green: 0.72, blue: 1.0)
 }
 
 private extension PulseTaskState {
@@ -1851,7 +1858,7 @@ private extension PulseTaskState {
     var tintColor: Color {
         switch self {
         case .running:
-            return .blue
+            return TaskSidebarPalette.runningInk
         case .waitingForApproval, .waitingForAnswer:
             return .orange
         case .completed:
