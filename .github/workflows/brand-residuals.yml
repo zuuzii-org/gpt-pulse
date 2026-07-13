@@ -1,0 +1,63 @@
+name: LLM Pulse CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check-brand:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Scan current identity files
+        run: make check-brand
+
+  macos-check:
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned XcodeGen
+        run: |
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$RUNNER_TEMP/xcodegen.zip" \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.45.4/xcodegen.zip
+          echo "090ec29491aad50aec10631bf6e62253fed733c50f3aab0f5ffc86bc170bdbef  $RUNNER_TEMP/xcodegen.zip" \
+            | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/xcodegen/bin" >> "$GITHUB_PATH"
+
+      - name: Verify XcodeGen version
+        run: |
+          test "$(xcodegen --version)" = "Version: 2.45.4"
+
+      - name: Run brand, Swift, plugin, release-tool, and Debug build checks
+        run: make check
+
+      - name: Reject generated project drift
+        run: |
+          xcodegen generate
+          git diff --exit-code -- LLMPulse.xcodeproj
+
+      - name: Build Universal Release
+        run: |
+          xcodebuild \
+            -project LLMPulse.xcodeproj \
+            -scheme LLMPulse \
+            -configuration Release \
+            -derivedDataPath .build/DerivedData \
+            -onlyUsePackageVersionsFromResolvedFile \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            ARCHS="arm64 x86_64" \
+            build
+          ARCHS_FOUND="$(lipo -archs '.build/DerivedData/Build/Products/Release/LLM Pulse.app/Contents/MacOS/LLM Pulse')"
+          test "$ARCHS_FOUND" = "x86_64 arm64" || test "$ARCHS_FOUND" = "arm64 x86_64"

@@ -4,32 +4,28 @@
 
 1. 无签名构建，然后使用 `Developer ID Application`、hardened runtime 和 secure timestamp 手动签名。
 2. 将 App 打包为 ZIP 提交公证，等待 `Accepted`，再 staple App。
-3. 创建带 `GPT Pulse.app → Applications` 拖拽布局的压缩 DMG，并签名 DMG。v1.4.0 暂时保留旧 wrapper 文件名以保证 Sparkle 与 Finder 原位覆盖，App 内显示名仍为 LLM Pulse。
+3. 创建带 `LLM Pulse.app → Applications` 拖拽布局的压缩 DMG，并签名 DMG；重复 wrapper 会在启动期数据迁移前被阻断。
 4. 再次提交 DMG 公证，然后 staple DMG。
 5. 使用 `codesign`、`stapler`、`spctl`、`hdiutil` 和 `lipo` 验证最终 DMG 及其中的 App。
-6. 生成 `.sha256`，再用 Sparkle EdDSA key 为最终 staple 后的 DMG 生成 `appcast.xml`，并仅用 `SUPublicEDKey` 验证 enclosure 签名。
+6. 生成 `.sha256`，再为最终 staple 后的 DMG 生成两跳 `appcast.xml`；v2 item 仅面向 bridge build 6 及更高版本，同时保留固定校验的 v1.4 item，并验证两项 enclosure。
 
-脚本不会接收 Apple ID 或密码。公证仅使用 Keychain 中的 profile，默认为 `GPTPulseNotary`。
+脚本不会接收 Apple ID 或密码。公证仅使用 Keychain 中的 profile，默认为 `LLMPulseNotary`。
 
 ## 前置条件
 
 - Xcode Command Line Tools、XcodeGen 和有效的 `Developer ID Application` 证书。
-- 为保持既有 Sparkle 更新信任链，默认继续从仓库外的旧文件名 `~/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key` 读取 Sparkle EdDSA 私钥；文件必须归当前用户所有、mode `0600`、只有一个 hard link，父目录必须为 mode `0700`，且公钥必须与 `Info.plist` 的 `SUPublicEDKey` 一致。
-- 需要创建全新的签名 key 时执行以下命令。脚本拒绝覆盖已有文件，只输出可公开的 `SUPublicEDKey`，不会输出私钥：
-
-  ```bash
-  scripts/sparkle_key_tool.swift generate \
-    "$HOME/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key"
-  ```
+- 为保持既有 Sparkle 更新信任链，默认从仓库外的 `~/Library/Application Support/Zuuzii/Release Keys/LLM Pulse Sparkle Ed25519.key` 读取 Sparkle EdDSA 私钥；文件必须归当前用户所有、mode `0600`、只有一个 hard link，父目录必须为 mode `0700`，且公钥必须与 `Info.plist` 的 `SUPublicEDKey` 一致。
+- 已发布更新链必须把现有 Sparkle 私钥原样安全迁移到上述新路径，不能重新生成 key；否则会与 App 内保留的 `SUPublicEDKey` 不匹配，脚本也会拒绝发布。
 - 已执行：
 
   ```bash
-  xcrun notarytool store-credentials "GPTPulseNotary" \
+  xcrun notarytool store-credentials "LLMPulseNotary" \
     --apple-id "<Apple ID>" \
     --team-id "<Team ID>"
   ```
 
 - 正式发布必须从 clean Git commit 执行。中间构建、公证 ZIP 和诊断位于已忽略的 `.build/release/`；最终 `dist/` 也必须保持在 `.gitignore` 中，只作为 GitHub Release 附件上传。
+- `docs/release-notes-vVERSION.md` 必须已存在，且 Codex plugin manifest 版本必须与 App 一致；脚本会在签名和公证前完成这些检查。
 
 ## 常用命令
 
@@ -86,9 +82,10 @@ swift scripts/render_dmg_background.swift \
 ```bash
 scripts/release.sh \
   --background Assets/Release/dmg-background.png \
-  --volume-icon Assets/Brand/GPTPulse.icns \
   --team-id "<Team ID>"
 ```
+
+未传 `--volume-icon` 时，发布脚本会使用已构建 App 中的 `AppIcon.icns`。
 
 无 Finder 的临时环境可以传 `--skip-finder-layout`，但正式公开发布不应使用该参数。`--allow-dirty` 也只允许与 `DRY_RUN` 一起使用；任何真实构建、签名或公证都会要求 clean Git commit。
 

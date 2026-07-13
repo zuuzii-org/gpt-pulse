@@ -1,0 +1,50 @@
+{
+  "id": 2,
+  "result": {
+    "rateLimitResetCredits": null,
+    "rateLimits": {
+      "credits": null,
+      "individualLimit": false,
+      "limitId": "codex",
+      "limitName": null,
+      "planType": "pro",
+      "primary": {
+        "resetsAt": 1800600000,
+        "usedPercent": 2,
+        "windowDurationMins": 10080
+      },
+      "rateLimitReachedType": null,
+      "secondary": null
+    },
+    "rateLimitsByLimitId": {
+      "codex": {
+        "credits": null,
+        "individualLimit": false,
+        "limitId": "codex",
+        "limitName": null,
+        "planType": "pro",
+        "primary": {
+          "resetsAt": 1800600000,
+          "usedPercent": 2,
+          "windowDurationMins": 10080
+        },
+        "rateLimitReachedType": null,
+        "secondary": null
+      },
+      "codex_bengalfox": {
+        "credits": null,
+        "individualLimit": true,
+        "limitId": "codex_bengalfox",
+        "limitName": "codex_bengalfox",
+        "planType": "pro",
+        "primary": {
+          "resetsAt": 1800600100,
+          "usedPercent": 61,
+          "windowDurationMins": 10080
+        },
+        "rateLimitReachedType": null,
+        "secondary": null
+      }
+    }
+  }
+}

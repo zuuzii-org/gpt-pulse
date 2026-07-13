@@ -1,11 +1,11 @@
 {
-  "name": "gpt-pulse",
+  "name": "llm-pulse",
   "interface": {
     "displayName": "LLM Pulse"
   },
   "plugins": [
     {
-      "name": "gpt-pulse",
+      "name": "llm-pulse",
       "source": {
         "source": "local",
         "path": "./Plugin"

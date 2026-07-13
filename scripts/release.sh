@@ -5,25 +5,33 @@ umask 077
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-readonly PROJECT_FILE="$REPO_ROOT/GPTPulse.xcodeproj"
+readonly PROJECT_FILE="$REPO_ROOT/LLMPulse.xcodeproj"
 readonly PROJECT_SPEC="$REPO_ROOT/project.yml"
-readonly INFO_PLIST="$REPO_ROOT/GPTPulse/Resources/Info.plist"
+readonly INFO_PLIST="$REPO_ROOT/LLMPulse/Resources/Info.plist"
+readonly PLUGIN_MANIFEST="$REPO_ROOT/Plugin/.codex-plugin/plugin.json"
 readonly BUILT_APP_NAME="LLM Pulse.app"
-readonly DISTRIBUTED_APP_NAME="GPT Pulse.app"
+readonly DISTRIBUTED_APP_NAME="LLM Pulse.app"
 readonly APP_EXECUTABLE="LLM Pulse"
-readonly SCHEME="GPTPulse"
+readonly SCHEME="LLMPulse"
 readonly VOLUME_NAME="LLM Pulse"
 readonly SPARKLE_FEED_URL="https://github.com/zuuzii-org/llm-pulse/releases/latest/download/appcast.xml"
 readonly RELEASE_DOWNLOAD_ROOT="https://github.com/zuuzii-org/llm-pulse/releases/download"
 readonly PROJECT_URL="https://github.com/zuuzii-org/llm-pulse"
-readonly DEFAULT_SPARKLE_PRIVATE_KEY_FILE="$HOME/Library/Application Support/Zuuzii/Release Keys/GPT Pulse Sparkle Ed25519.key"
+readonly DEFAULT_SPARKLE_PRIVATE_KEY_FILE="$HOME/Library/Application Support/Zuuzii/Release Keys/LLM Pulse Sparkle Ed25519.key"
+readonly SPARKLE_BRIDGE_VERSION="1.4.0"
+readonly SPARKLE_BRIDGE_BUILD="6"
+readonly SPARKLE_BRIDGE_DMG_NAME="LLM-Pulse-1.4.0.dmg"
+readonly SPARKLE_BRIDGE_APPCAST_URL="$RELEASE_DOWNLOAD_ROOT/v$SPARKLE_BRIDGE_VERSION/appcast.xml"
+readonly SPARKLE_BRIDGE_DMG_URL="$RELEASE_DOWNLOAD_ROOT/v$SPARKLE_BRIDGE_VERSION/$SPARKLE_BRIDGE_DMG_NAME"
+readonly SPARKLE_BRIDGE_APPCAST_SHA256="d324b4ff25932bfd5c400cd643e4807eab92ddddd246aa1e6d5318b7d32ec888"
+readonly SPARKLE_BRIDGE_DMG_SHA256="f08274014f9a486b33abae034e8cf8f76171dfb6282b7d264347b2b4269fc4b3"
 
 STAGE="all"
 VERSION=""
 OUTPUT_DIR=""
 BACKGROUND_PATH="${BACKGROUND_PATH:-}"
 VOLUME_ICON_PATH="${VOLUME_ICON_PATH:-}"
-NOTARY_PROFILE="${NOTARY_PROFILE:-GPTPulseNotary}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-LLMPulseNotary}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 TEAM_ID="${TEAM_ID:-}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -47,6 +55,9 @@ SPARKLE_BIN_DIR=""
 SPARKLE_GENERATE_KEYS=""
 SPARKLE_GENERATE_APPCAST=""
 SPARKLE_KEY_TOOL=""
+SPARKLE_APPCAST_MERGE_TOOL=""
+SPARKLE_BRIDGE_APPCAST_PATH=""
+SPARKLE_BRIDGE_DMG_PATH=""
 MOUNT_DIR=""
 MOUNTED=0
 RESOLVED_SIGNING_IDENTITY=""
@@ -69,7 +80,7 @@ Options:
   --output-dir PATH         Artifact directory (default: dist)
   --background PATH         640x420 PNG with an adjacent 1280x840 @2x PNG
   --volume-icon PATH        Optional .icns file for the mounted DMG volume
-  --notary-profile NAME     notarytool Keychain profile (default: GPTPulseNotary)
+  --notary-profile NAME     notarytool Keychain profile (default: LLMPulseNotary)
   --team-id ID              Restrict automatic certificate selection to a Team ID
   --signing-identity VALUE  Certificate SHA-1 or keychain identity name
   --skip-finder-layout      Skip Finder window/icon layout (for headless rehearsal)
@@ -249,6 +260,9 @@ initialize_paths() {
   [[ "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z.-]*$ ]] || die "invalid version: $VERSION"
   [[ "$source_version" == "$VERSION" ]] || \
     die "requested version $VERSION does not match Info.plist version $source_version"
+  [[ "$SOURCE_BUILD" =~ ^[0-9]+$ ]] || die "CFBundleVersion must be an integer"
+  (( SOURCE_BUILD > SPARKLE_BRIDGE_BUILD )) || \
+    die "CFBundleVersion must be greater than bridge build $SPARKLE_BRIDGE_BUILD"
 
   if [[ -z "$OUTPUT_DIR" ]]; then
     OUTPUT_DIR="$REPO_ROOT/dist"
@@ -265,8 +279,8 @@ initialize_paths() {
 
   if [[ -n "$VOLUME_ICON_PATH" ]]; then
     VOLUME_ICON_PATH="$(absolute_from_repo "$VOLUME_ICON_PATH")"
-  elif [[ -f "$REPO_ROOT/Assets/Brand/GPTPulse.icns" ]]; then
-    VOLUME_ICON_PATH="$REPO_ROOT/Assets/Brand/GPTPulse.icns"
+  elif [[ -f "$REPO_ROOT/Assets/Brand/LLMPulse.icns" ]]; then
+    VOLUME_ICON_PATH="$REPO_ROOT/Assets/Brand/LLMPulse.icns"
   fi
 
   if [[ "$SPARKLE_KEY_SOURCE" == "file" ]]; then
@@ -289,6 +303,9 @@ initialize_paths() {
   SPARKLE_GENERATE_KEYS="$SPARKLE_BIN_DIR/generate_keys"
   SPARKLE_GENERATE_APPCAST="$SPARKLE_BIN_DIR/generate_appcast"
   SPARKLE_KEY_TOOL="$REPO_ROOT/scripts/sparkle_key_tool.swift"
+  SPARKLE_APPCAST_MERGE_TOOL="$REPO_ROOT/scripts/merge_sparkle_bridge_appcast.py"
+  SPARKLE_BRIDGE_APPCAST_PATH="$WORK_DIR/sparkle-bridge/appcast.xml"
+  SPARKLE_BRIDGE_DMG_PATH="$WORK_DIR/sparkle-bridge/$SPARKLE_BRIDGE_DMG_NAME"
   MOUNT_DIR="$WORK_DIR/mount"
   MANIFEST_PATH="$WORK_DIR/release-manifest.plist"
 }
@@ -345,7 +362,7 @@ validate_options() {
 
 validate_dmg_background_assets() {
   local background_2x width height width_2x height_2x format format_2x
-  [[ -n "$BACKGROUND_PATH" ]] || return
+  [[ -n "$BACKGROUND_PATH" ]] || return 0
 
   background_2x="${BACKGROUND_PATH%.*}@2x.${BACKGROUND_PATH##*.}"
   if is_true "$DRY_RUN" && [[ ! -f "$BACKGROUND_PATH" || ! -f "$background_2x" ]]; then
@@ -392,6 +409,17 @@ validate_source_sparkle_configuration() {
   log "validated Sparkle feed, EdDSA public key, and privacy settings"
 }
 
+validate_release_source_versions() {
+  local plugin_version
+  [[ -f "$RELEASE_NOTES_PATH" ]] || \
+    die "release notes are required before signing or notarization: $RELEASE_NOTES_PATH"
+  [[ -f "$PLUGIN_MANIFEST" ]] || die "Codex plugin manifest is missing: $PLUGIN_MANIFEST"
+  plugin_version="$(/usr/bin/plutil -extract version raw -o - "$PLUGIN_MANIFEST" 2>/dev/null || true)"
+  [[ "$plugin_version" == "$VERSION" ]] || \
+    die "Codex plugin version $plugin_version does not match app version $VERSION"
+  log "validated release notes and Codex companion plugin version"
+}
+
 validate_file_backed_sparkle_key() {
   local expected_public_key actual_public_key
   if [[ "$SPARKLE_KEY_SOURCE" != "file" ]]; then
@@ -421,7 +449,7 @@ stage_requires_notarization() {
 }
 
 validate_notary_profile() {
-  stage_requires_notarization || return
+  stage_requires_notarization || return 0
 
   if is_true "$DRY_RUN"; then
     log "[dry-run] verify notarytool Keychain profile $NOTARY_PROFILE"
@@ -603,7 +631,7 @@ verify_app_metadata() {
   public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$plist")"
   verify_before_extraction="$(/usr/bin/plutil -extract SUVerifyUpdateBeforeExtraction raw -o - "$plist")"
 
-  [[ "$bundle_id" == "com.zuuzii.GPTPulse" ]] || die "unexpected bundle ID: $bundle_id"
+  [[ "$bundle_id" == "com.zuuzii.LLMPulse" ]] || die "unexpected bundle ID: $bundle_id"
   [[ "$bundle_name" == "LLM Pulse" ]] || die "unexpected bundle name: $bundle_name"
   [[ "$display_name" == "LLM Pulse" ]] || die "unexpected display name: $display_name"
   [[ "$executable_name" == "$APP_EXECUTABLE" ]] || die "unexpected executable name: $executable_name"
@@ -925,9 +953,6 @@ create_and_sign_dmg() {
     MOUNTED=1
   fi
 
-  # v1.4.0 is a bridge release: keep the on-disk wrapper name used by existing
-  # installations so both Sparkle and Finder replace GPT Pulse.app atomically.
-  # The signed bundle contents and all user-facing product strings remain LLM Pulse.
   run /usr/bin/ditto --rsrc --extattr "$APP_PATH" "$MOUNT_DIR/$DISTRIBUTED_APP_NAME"
   run /bin/ln -s /Applications "$MOUNT_DIR/Applications"
 
@@ -1020,22 +1045,99 @@ resolve_sparkle_tools_and_key() {
   log "verified Sparkle tools and Keychain signing identity"
 }
 
+download_and_verify_sparkle_bridge_release() {
+  local bridge_dir actual_appcast_hash actual_dmg_hash item_count
+  local build short_version minimum_update url signature declared_length actual_length
+  local expected_public_key
+  bridge_dir="$(dirname "$SPARKLE_BRIDGE_APPCAST_PATH")"
+
+  log "fetching the pinned Sparkle bridge release"
+  safe_remove_release_path "$bridge_dir"
+  run /bin/mkdir -p "$bridge_dir"
+  run /usr/bin/curl --fail --location --retry 3 --silent --show-error \
+    --output "$SPARKLE_BRIDGE_APPCAST_PATH" "$SPARKLE_BRIDGE_APPCAST_URL"
+  run /usr/bin/curl --fail --location --retry 3 --silent --show-error \
+    --output "$SPARKLE_BRIDGE_DMG_PATH" "$SPARKLE_BRIDGE_DMG_URL"
+  if is_true "$DRY_RUN"; then
+    log "[dry-run] verify pinned bridge hashes, metadata, notarization, and EdDSA signature"
+    return
+  fi
+
+  actual_appcast_hash="$(/usr/bin/shasum -a 256 "$SPARKLE_BRIDGE_APPCAST_PATH" | /usr/bin/awk '{print $1}')"
+  actual_dmg_hash="$(/usr/bin/shasum -a 256 "$SPARKLE_BRIDGE_DMG_PATH" | /usr/bin/awk '{print $1}')"
+  [[ "$actual_appcast_hash" == "$SPARKLE_BRIDGE_APPCAST_SHA256" ]] || \
+    die "pinned bridge appcast hash mismatch"
+  [[ "$actual_dmg_hash" == "$SPARKLE_BRIDGE_DMG_SHA256" ]] || \
+    die "pinned bridge DMG hash mismatch"
+
+  /usr/bin/xmllint --noout "$SPARKLE_BRIDGE_APPCAST_PATH" || \
+    die "pinned bridge appcast is not valid XML"
+  item_count="$(/usr/bin/xmllint --xpath 'count(/rss/channel/item)' \
+    "$SPARKLE_BRIDGE_APPCAST_PATH")"
+  build="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item/*[local-name()='version'])[1])" \
+    "$SPARKLE_BRIDGE_APPCAST_PATH")"
+  short_version="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item/*[local-name()='shortVersionString'])[1])" \
+    "$SPARKLE_BRIDGE_APPCAST_PATH")"
+  minimum_update="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item/*[local-name()='minimumUpdateVersion'])[1])" \
+    "$SPARKLE_BRIDGE_APPCAST_PATH")"
+  url="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item/enclosure)[1]/@url)" \
+    "$SPARKLE_BRIDGE_APPCAST_PATH")"
+  signature="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item/enclosure)[1]/@*[local-name()='edSignature'])" \
+    "$SPARKLE_BRIDGE_APPCAST_PATH")"
+  declared_length="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item/enclosure)[1]/@length)" \
+    "$SPARKLE_BRIDGE_APPCAST_PATH")"
+  actual_length="$(/usr/bin/stat -f %z "$SPARKLE_BRIDGE_DMG_PATH")"
+
+  [[ "$item_count" == "1" ]] || die "pinned bridge appcast must contain one item"
+  [[ "$build" == "$SPARKLE_BRIDGE_BUILD" ]] || die "unexpected bridge build: $build"
+  [[ "$short_version" == "$SPARKLE_BRIDGE_VERSION" ]] || \
+    die "unexpected bridge version: $short_version"
+  [[ -z "$minimum_update" ]] || die "bridge item must not have minimumUpdateVersion"
+  [[ "$url" == "$SPARKLE_BRIDGE_DMG_URL" ]] || die "unexpected bridge URL: $url"
+  [[ "$declared_length" == "$actual_length" ]] || \
+    die "bridge enclosure length does not match the pinned DMG"
+  [[ -n "$signature" ]] || die "bridge enclosure has no EdDSA signature"
+  expected_public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$INFO_PLIST")"
+  "$SPARKLE_KEY_TOOL" verify \
+    "$expected_public_key" "$SPARKLE_BRIDGE_DMG_PATH" "$signature" >/dev/null || \
+    die "bridge DMG failed EdDSA verification against SUPublicEDKey"
+  verify_dmg_signature "$SPARKLE_BRIDGE_DMG_PATH"
+  run /usr/bin/xcrun stapler validate -v "$SPARKLE_BRIDGE_DMG_PATH"
+  log "verified pinned Sparkle bridge build $SPARKLE_BRIDGE_BUILD"
+}
+
 verify_appcast() {
   local appcast="$1"
-  local version short_version minimum_system hardware_requirements
+  local channel_title item_count version short_version minimum_update
+  local minimum_system hardware_requirements
   local update_url signature declared_length actual_length expected_public_key
+  local bridge_version bridge_short_version bridge_minimum_update bridge_url
+  local bridge_signature bridge_declared_length bridge_actual_length
   require_file "$appcast"
   require_file "$DMG_PATH"
+  require_file "$SPARKLE_BRIDGE_DMG_PATH"
   if is_true "$DRY_RUN"; then
-    log "[dry-run] verify appcast XML, version, URL, length, minimum macOS, and EdDSA signature"
+    log "[dry-run] verify two-hop appcast selection, URLs, lengths, minimum macOS, and EdDSA signatures"
     return
   fi
 
   /usr/bin/xmllint --noout "$appcast" || die "generated appcast is not valid XML"
+  channel_title="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/title)[1])" "$appcast")"
+  item_count="$(/usr/bin/xmllint --xpath 'count(/rss/channel/item)' "$appcast")"
   version="$(/usr/bin/xmllint --xpath \
     "string((//*[local-name()='version'])[1])" "$appcast")"
   short_version="$(/usr/bin/xmllint --xpath \
     "string((//*[local-name()='shortVersionString'])[1])" "$appcast")"
+  minimum_update="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item[1]/*[local-name()='minimumUpdateVersion'])[1])" \
+    "$appcast")"
   minimum_system="$(/usr/bin/xmllint --xpath \
     "string((//*[local-name()='minimumSystemVersion'])[1])" "$appcast")"
   hardware_requirements="$(/usr/bin/xmllint --xpath \
@@ -1047,10 +1149,31 @@ verify_appcast() {
   declared_length="$(/usr/bin/xmllint --xpath \
     "string((//*[local-name()='enclosure'])[1]/@length)" "$appcast")"
   actual_length="$(/usr/bin/stat -f %z "$DMG_PATH")"
+  bridge_version="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item[2]/*[local-name()='version'])[1])" "$appcast")"
+  bridge_short_version="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item[2]/*[local-name()='shortVersionString'])[1])" \
+    "$appcast")"
+  bridge_minimum_update="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item[2]/*[local-name()='minimumUpdateVersion'])[1])" \
+    "$appcast")"
+  bridge_url="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item[2]/enclosure)[1]/@url)" "$appcast")"
+  bridge_signature="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item[2]/enclosure)[1]/@*[local-name()='edSignature'])" \
+    "$appcast")"
+  bridge_declared_length="$(/usr/bin/xmllint --xpath \
+    "string((/rss/channel/item[2]/enclosure)[1]/@length)" "$appcast")"
+  bridge_actual_length="$(/usr/bin/stat -f %z "$SPARKLE_BRIDGE_DMG_PATH")"
 
+  [[ "$channel_title" == "LLM Pulse" ]] || \
+    die "appcast title is $channel_title, expected LLM Pulse"
+  [[ "$item_count" == "2" ]] || die "appcast must contain current and bridge items"
   [[ "$version" == "$SOURCE_BUILD" ]] || die "appcast build is $version, expected $SOURCE_BUILD"
   [[ "$short_version" == "$VERSION" ]] || \
     die "appcast version is $short_version, expected $VERSION"
+  [[ "$minimum_update" == "$SPARKLE_BRIDGE_BUILD" ]] || \
+    die "current appcast item must require host build $SPARKLE_BRIDGE_BUILD"
   /usr/bin/awk -v version="$minimum_system" 'BEGIN {
     gsub(/^[[:space:]]+/, "", version)
     gsub(/[[:space:]]+$/, "", version)
@@ -1068,13 +1191,28 @@ verify_appcast() {
   expected_public_key="$(/usr/bin/plutil -extract SUPublicEDKey raw -o - "$INFO_PLIST")"
   "$SPARKLE_KEY_TOOL" verify "$expected_public_key" "$DMG_PATH" "$signature" >/dev/null || \
     die "Sparkle EdDSA signature verification failed against SUPublicEDKey"
-  log "verified appcast metadata and Sparkle EdDSA update signature"
+  [[ "$bridge_version" == "$SPARKLE_BRIDGE_BUILD" ]] || \
+    die "second appcast item is not bridge build $SPARKLE_BRIDGE_BUILD"
+  [[ "$bridge_short_version" == "$SPARKLE_BRIDGE_VERSION" ]] || \
+    die "unexpected bridge short version: $bridge_short_version"
+  [[ -z "$bridge_minimum_update" ]] || \
+    die "bridge item must remain available to pre-bridge hosts"
+  [[ "$bridge_url" == "$SPARKLE_BRIDGE_DMG_URL" ]] || \
+    die "unexpected bridge enclosure URL: $bridge_url"
+  [[ "$bridge_declared_length" == "$bridge_actual_length" ]] || \
+    die "bridge appcast length does not match the pinned DMG"
+  [[ -n "$bridge_signature" ]] || die "bridge appcast enclosure has no EdDSA signature"
+  "$SPARKLE_KEY_TOOL" verify \
+    "$expected_public_key" "$SPARKLE_BRIDGE_DMG_PATH" "$bridge_signature" >/dev/null || \
+    die "Sparkle bridge signature verification failed against SUPublicEDKey"
+  log "verified two-hop Sparkle appcast and both EdDSA update signatures"
 }
 
 generate_and_verify_appcast() {
   local source_dir="$WORK_DIR/appcast-source"
   local source_dmg="$source_dir/$(basename "$DMG_PATH")"
   local source_notes="$source_dir/LLM-Pulse-$VERSION.md"
+  local generated_current_appcast="$source_dir/current-appcast.xml"
   local generated_appcast="$source_dir/appcast.xml"
 
   log "generating Sparkle appcast from the final notarized DMG"
@@ -1097,9 +1235,10 @@ generate_and_verify_appcast() {
       --embed-release-notes \
       --link "$PROJECT_URL" \
       --versions "$SOURCE_BUILD" \
+      --minimum-update-version "$SPARKLE_BRIDGE_BUILD" \
       --maximum-versions 1 \
       --maximum-deltas 0 \
-      -o "$generated_appcast" \
+      -o "$generated_current_appcast" \
       "$source_dir"
   else
     run "$SPARKLE_GENERATE_APPCAST" \
@@ -1108,11 +1247,21 @@ generate_and_verify_appcast() {
       --embed-release-notes \
       --link "$PROJECT_URL" \
       --versions "$SOURCE_BUILD" \
+      --minimum-update-version "$SPARKLE_BRIDGE_BUILD" \
       --maximum-versions 1 \
       --maximum-deltas 0 \
-      -o "$generated_appcast" \
+      -o "$generated_current_appcast" \
       "$source_dir"
   fi
+  download_and_verify_sparkle_bridge_release
+  run /usr/bin/python3 "$SPARKLE_APPCAST_MERGE_TOOL" \
+    --current "$generated_current_appcast" \
+    --bridge "$SPARKLE_BRIDGE_APPCAST_PATH" \
+    --output "$generated_appcast" \
+    --current-build "$SOURCE_BUILD" \
+    --bridge-build "$SPARKLE_BRIDGE_BUILD" \
+    --minimum-update-build "$SPARKLE_BRIDGE_BUILD" \
+    --channel-title "LLM Pulse"
   run /bin/cp "$generated_appcast" "$APPCAST_PATH"
   verify_appcast "$APPCAST_PATH"
   log "Sparkle appcast ready: $APPCAST_PATH"
@@ -1150,8 +1299,6 @@ verify_final_release() {
       app_count=$((app_count + 1))
     done
     [[ "$app_count" -eq 1 ]] || die "DMG must contain exactly one application bundle"
-    [[ ! -e "$MOUNT_DIR/$BUILT_APP_NAME" ]] || \
-      die "bridge DMG must not contain the built wrapper name: $BUILT_APP_NAME"
     [[ -L "$MOUNT_DIR/Applications" ]] || die "DMG Applications item is not a symlink"
     [[ "$(/usr/bin/readlink "$MOUNT_DIR/Applications")" == "/Applications" ]] || \
       die "DMG Applications symlink has the wrong target"
@@ -1194,6 +1341,7 @@ write_checksum() {
 preflight() {
   require_file "$PROJECT_SPEC"
   require_file "$INFO_PLIST"
+  require_file "$SPARKLE_APPCAST_MERGE_TOOL"
   require_command git
   require_command plutil
   require_command codesign
@@ -1213,11 +1361,14 @@ preflight() {
   require_command shasum
   require_command xmllint
   require_command base64
+  require_command curl
+  require_command python3
   if ! is_true "$SKIP_FINDER_LAYOUT"; then
     require_command osascript
   fi
   validate_dmg_background_assets
   validate_source_sparkle_configuration
+  validate_release_source_versions
   validate_file_backed_sparkle_key
   require_clean_worktree
   resolve_git_head

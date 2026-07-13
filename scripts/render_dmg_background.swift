@@ -540,7 +540,7 @@ private func main() throws {
         try renderPreview(
             backgroundURL: assetsDirectory.appendingPathComponent("dmg-background@2x.png"),
             appIconURL: repoRoot
-                .appendingPathComponent("Assets/Brand/GPTPulse-AppIcon-Rendered-512.png"),
+                .appendingPathComponent("Assets/Brand/LLMPulse-AppIcon-Rendered-512.png"),
             outputURL: previewURL
         )
         print("Rendered Finder preview: \(previewURL.path)")

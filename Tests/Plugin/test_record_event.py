@@ -13,6 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HOOK = ROOT / "Plugin" / "hooks" / "record_event.sh"
 HOOKS_CONFIG = ROOT / "Plugin" / "hooks" / "hooks.json"
+PLUGIN_MANIFEST = ROOT / "Plugin" / ".codex-plugin" / "plugin.json"
+MARKETPLACE_MANIFEST = ROOT / ".agents" / "plugins" / "marketplace.json"
 MAX_JOURNAL_BYTES = 8 * 1024 * 1024
 
 
@@ -24,7 +26,7 @@ class RecordEventHookTests(unittest.TestCase):
             self.home
             / "Library"
             / "Application Support"
-            / "GPT Pulse"
+            / "LLM Pulse"
             / "events"
             / "events.jsonl"
         )
@@ -204,6 +206,17 @@ class RecordEventHookTests(unittest.TestCase):
                         hook["command"],
                         '/bin/sh "${PLUGIN_ROOT}/hooks/record_event.sh"',
                     )
+
+    def test_plugin_and_marketplace_use_llm_pulse_identifier(self) -> None:
+        plugin = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))
+        marketplace = json.loads(MARKETPLACE_MANIFEST.read_text(encoding="utf-8"))
+
+        self.assertEqual(plugin["name"], "llm-pulse")
+        self.assertEqual(marketplace["name"], "llm-pulse")
+        self.assertEqual(
+            [entry["name"] for entry in marketplace["plugins"]],
+            ["llm-pulse"],
+        )
 
 
 if __name__ == "__main__":

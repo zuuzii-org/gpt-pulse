@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="Assets/Brand/GPTPulse-AppIcon-Rendered-512.png" width="128" height="128" alt="LLM Pulse app icon">
+  <img src="Assets/Brand/LLMPulse-AppIcon-Rendered-512.png" width="128" height="128" alt="LLM Pulse app icon">
 </p>
 
-# LLM Pulse — Local AI Coding Task Monitor for macOS
+# LLM Pulse — Codex Task Monitor for macOS
 
-<p align="center"><strong>AI coding tasks, always in sight.</strong></p>
+<p align="center"><strong>Codex tasks, always in sight.</strong></p>
 
 <p align="center">
   <a href="README.md">English</a> ·
@@ -17,24 +17,19 @@
   <a href="LICENSE">MIT License</a>
 </p>
 
-**LLM Pulse is an open-source native macOS menu bar monitor for local AI coding tasks.** Its current public release monitors Codex Desktop; v2.0 expands the same right-edge workflow to Claude Code with Qwen3.7. LLM Pulse keeps running tasks, work waiting for approval or input, recent completions, active agent totals, token usage, and usage-limit data visible without changing the underlying task records.
+**LLM Pulse is an open-source native macOS menu bar monitor for local Codex Desktop tasks.** It keeps running work, tasks waiting for approval or an answer, recent completions, active agent totals, token usage, and the Codex weekly usage limit visible without changing the underlying task records.
 
-The app interface supports English and Simplified Chinese. Choose Follow System, 简体中文, or English in Settings; changes apply immediately without restarting.
-
-<p align="center">
-  <img src="Assets/Release/product-sidebar.png" width="400" alt="LLM Pulse sidebar showing running Codex tasks, approval requests, active agents, recent completions, token usage, and usage-limit reset times">
-</p>
+The interface supports English and Simplified Chinese. Choose Follow System, 简体中文, or English in Settings; changes apply immediately without restarting.
 
 ## Product facts
 
 | | |
 |---|---|
-| **Product** | LLM Pulse |
+| **Product** | LLM Pulse 2.0.0 |
 | **Developer** | Zuuzii |
 | **Platform** | macOS 14 or later; Apple Silicon and Intel |
-| **Category** | Local AI coding task monitor and menu bar companion |
-| **Current task scope** | Local root tasks created by Codex Desktop |
-| **v2 target** | Claude Code with Qwen3.7, separated by model page |
+| **Category** | Local Codex task monitor and menu bar utility |
+| **Task scope** | Local root tasks created by Codex Desktop |
 | **Data model** | Local, read-only adapters; no task analytics service |
 | **Network use** | GitHub Releases for optional update checks and downloads |
 | **License** | MIT |
@@ -42,47 +37,46 @@ The app interface supports English and Simplified Chinese. Choose Follow System,
 
 ## Download
 
-[Download the latest signed and notarized DMG](https://github.com/zuuzii-org/llm-pulse/releases/latest). **LLM Pulse v1.4.0** requires macOS 14 or later and ships as a Universal App for Apple Silicon and Intel Macs. Claude Code and Qwen3.7 support remains planned for v2.0.0.
+[Download the latest signed and notarized DMG](https://github.com/zuuzii-org/llm-pulse/releases/latest). LLM Pulse 2.0.0 requires macOS 14 or later and ships as a Universal App for Apple Silicon and Intel Macs.
 
-The v1.4.0 release assets are:
+The v2.0.0 release assets are:
 
-- `LLM-Pulse-1.4.0.dmg`
-- `LLM-Pulse-1.4.0.dmg.sha256`
+- `LLM-Pulse-2.0.0.dmg`
+- `LLM-Pulse-2.0.0.dmg.sha256`
 
-To verify the download, place both files in the same folder and run:
+Place both files in the same folder and verify the download with:
 
 ```bash
-shasum -a 256 -c LLM-Pulse-1.4.0.dmg.sha256
+shasum -a 256 -c LLM-Pulse-2.0.0.dmg.sha256
 ```
 
-If you are using v1.0.0, install v1.1.0 manually once. v1.0.0 did not include in-app updates, so it cannot discover the update channel. From v1.1.0 onward, right-click the menu bar item and choose `检查更新…` (“Check for Updates…”) to update in place.
+Users on v1.0.0 must install v1.1.0 manually once because v1.0.0 did not include in-app updates. Users on v1.1–v1.3 should install and launch v1.4 before updating to v2.0.0.
 
 ## What LLM Pulse shows
 
-- **A compact menu bar status.** The top number is the count of active tasks; the bottom number is the count of recently completed tasks. Waiting work turns the active indicator orange, while failures turn it red.
+- **A compact menu bar status.** The top number is the active-task count; the bottom number is the recent-completion count. Waiting work turns the active indicator orange, while failures turn it red.
 - **A full-height task sidebar.** Hold the pointer at the middle 60% of the current display’s right edge for about 200 ms. The 400 px panel opens on the display under the pointer and avoids internal seams between adjacent displays.
-- **Collapsible task groups.** Running and recently completed sections can be folded independently. LLM Pulse remembers both choices between launches.
-- **States that need attention.** Waiting for approval and waiting for an answer are prioritized. Failed and interrupted work remains clearly identified in the recent list.
+- **Clear task groups.** Running, waiting for approval, waiting for an answer, and recent tasks remain visually distinct. Running and recent sections can be folded independently, and their state is restored at the next launch.
 - **Useful task context.** Each row shows the project, session, elapsed time, latest state, cumulative token use, and the active total for the main agent plus descendant agents.
-- **Direct navigation.** Clicking a task opens its Codex Desktop task through `codex://threads/<thread-id>`. Opening a completed task from LLM Pulse marks it as viewed; manual and batch acknowledgement are also available.
-- **Codex usage limits.** The sidebar shows the remaining percentage, reset time, and freshness for the 5-hour and weekly windows.
-- **Native notifications.** Choose attention-only, important, or all recognizable states. Notifications support task actions, 15-minute or 1-hour snooze, quiet completion summaries, and usage-limit warnings.
+- **Codex weekly usage.** The usage card shows the remaining weekly percentage, an exact reset date and time in the Mac’s current time zone, and data freshness.
+- **Direct task navigation.** Clicking a row opens the matching task through `codex://threads/<thread-id>`. A completion is marked viewed automatically only after the task opens successfully.
+- **Native notifications.** Choose attention-only, important, or all recognizable states. Notifications support task actions, 15-minute or 1-hour snooze, quiet completion summaries, and weekly usage warnings.
 - **Project controls.** Focus the panel on one Git project or mute that project’s notifications for an hour or until the next day. Menu bar totals remain global.
-- **macOS behavior.** Launch at login, multiple displays, reduced-motion support, configurable edge triggering in full-screen apps, and an instant English/Simplified Chinese language switch are built in.
+- **macOS behavior.** Launch at login, multiple displays, reduced-motion support, configurable edge triggering in full-screen apps, and instant English/Simplified Chinese switching are built in.
 
-Recently completed tasks remain available for 24 hours, up to 20 items. Unviewed successful tasks receive retention priority, and a batch acknowledgement can be undone for six seconds.
+Recent tasks remain available for 24 hours, up to 20 items. Unviewed successful tasks receive retention priority, and a batch acknowledgement can be undone for six seconds.
 
 ## How it works
 
-LLM Pulse combines a few narrow local adapters instead of treating any one private Codex file format as permanent:
+LLM Pulse combines narrow local adapters instead of treating any private Codex format as permanent:
 
-1. The optional plugin writes minimized lifecycle events for timely running and approval-waiting updates.
-2. Codex state SQLite databases are opened with read-only mode and SQLite `query_only` enabled.
-3. Rollout JSONL is parsed for task state, timestamps, agent lifecycle, token summaries, and compatible usage-limit snapshots.
-4. The bundled Codex App Server is queried locally with `account/rateLimits/read` for the same grouped 5-hour and weekly limits shown by Codex Desktop.
-5. Viewed receipts and LLM Pulse preferences remain under the compatibility path `~/Library/Application Support/GPT Pulse/` so existing installations keep their state after the rename.
+1. The optional Codex plugin writes minimized lifecycle events for timely running and approval-waiting updates.
+2. Codex state SQLite databases are opened read-only with SQLite `query_only` enabled.
+3. Rollout JSONL is parsed for task state, timestamps, agent lifecycle, token summaries, and compatible usage snapshots.
+4. The bundled Codex App Server is queried locally with `account/rateLimits/read`; the current interface and notifications use the weekly window.
+5. Viewed receipts and LLM Pulse preferences stay under `~/Library/Application Support/LLM Pulse/`. Upgrade-only path aliases are isolated in centralized `LegacyCompatibility` definitions.
 
-Only root tasks created by Codex Desktop appear as rows. Descendant agents are rolled into the active `Agent N` total of their root task rather than displayed as separate tasks. See [the architecture notes](docs/ARCHITECTURE.md) for state precedence, retention, quota selection, and adapter failure behavior.
+Only local root tasks created by Codex Desktop appear as rows. Descendant agents are rolled into the active `Agent N` total of their root task rather than displayed separately. See [the architecture notes](docs/ARCHITECTURE.md) for state precedence, retention, weekly-usage selection, and adapter failure behavior.
 
 ## Privacy and network access
 
@@ -90,39 +84,41 @@ LLM Pulse is designed as a read-only observer:
 
 - It does not write to Codex databases, rollouts, task records, or App Server state.
 - It does not extract, retain, or upload prompts, tool input, tool output, or transcript content.
-- The optional hook journal keeps only `session_id`, `turn_id`, the event name, and a timestamp. It does not record project paths.
-- Viewed receipts, notification settings, and usage-warning deduplication keys stay on the Mac. Muted projects are stored as SHA-256 identifiers rather than plain-text paths.
+- The optional Codex journal keeps only `session_id`, `turn_id`, the event name, and a timestamp. It does not record project paths, prompts, messages, tool payloads, or responses.
+- Viewed receipts, notification settings, and weekly-warning deduplication keys stay on the Mac. Muted projects are stored as SHA-256 identifiers rather than plain-text paths.
 - No OpenAI API key is required. LLM Pulse includes no task analytics or task-data upload service.
 
-An optional update check reads the public release information hosted on GitHub. It does not attach Codex task data or a generated system profile. Normal task monitoring remains local.
+An optional update check reads public release information hosted on GitHub. It does not attach Codex task data or a generated system profile. Normal task monitoring remains local.
 
 ## Install
 
 1. Download the DMG and matching SHA-256 file from [GitHub Releases](https://github.com/zuuzii-org/llm-pulse/releases/latest).
 2. Verify the checksum with the command above.
-3. Open the DMG and drag `GPT Pulse.app` to `Applications`. v1.4.0 keeps this legacy on-disk wrapper name for one compatibility release so both Sparkle and Finder replace existing installations cleanly; the product shown after launch is **LLM Pulse**.
+3. Open the DMG and drag `LLM Pulse.app` to `Applications`.
 4. Launch the app from `Applications`. Notification permission is optional; local task monitoring works without it.
-5. Enable launch at login in LLM Pulse settings if desired.
+5. Enable launch at login in LLM Pulse Settings if desired.
 
 ## In-app updates
 
-The legacy GPT Pulse v1.1.0 release added in-app updates. Right-click the menu bar item and choose `检查更新…` to check the public GitHub Release feed and install a newer version.
+In-app updates have been available since v1.1.0. Right-click the menu bar item and choose `检查更新…` (“Check for Updates…”) to check the public GitHub Release feed and install a newer version.
 
-v1.1.0 is the bootstrap release for this update channel. Users on v1.0.0 must download and install v1.1.0 manually once; later releases can update in place across the product and repository rename.
+v1.1.0 is the bootstrap release for this update channel. Users on v1.0.0 must install v1.1.0 manually once. When moving to v2, users on v1.1–v1.3 must install and launch v1.4 first, then check for updates again.
+
+For a manual v2 installation, quit the installed version and remove its previous wrapper before dragging `LLM Pulse.app` into `Applications`; do not keep both copies. Because v2 uses a new macOS application identity, macOS may ask for notification permission again. Check Launch at Login in LLM Pulse Settings after upgrading.
 
 ## Optional Codex plugin
 
 The app works without the plugin by falling back to read-only SQLite and rollout JSONL. Installing the bundled lifecycle hooks improves the timeliness of running and approval-waiting states.
 
 ```bash
-codex plugin marketplace add zuuzii-org/llm-pulse --ref v1.4.0
-codex plugin add gpt-pulse@gpt-pulse
+codex plugin marketplace add zuuzii-org/llm-pulse
+codex plugin add llm-pulse@llm-pulse
 ```
 
 Review and trust the hooks when Codex asks. The plugin writes minimized events to:
 
 ```text
-~/Library/Application Support/GPT Pulse/events/events.jsonl
+~/Library/Application Support/LLM Pulse/events/events.jsonl
 ```
 
 The hooks depend only on `/bin/sh` and JXA included with macOS. They do not require Python, Node.js, or an external runtime.
@@ -131,11 +127,11 @@ The hooks depend only on `/bin/sh` and JXA included with macOS. They do not requ
 
 ### What is LLM Pulse?
 
-LLM Pulse is a native macOS menu bar monitor for local Codex Desktop tasks. It summarizes task state and usage in a right-edge sidebar so you do not need to keep every task window open.
+LLM Pulse is a native macOS menu bar monitor for local Codex Desktop tasks. It summarizes task state and weekly usage in a right-edge sidebar so you do not need to keep every task window open.
 
 ### How can I monitor multiple Codex Desktop tasks on macOS?
 
-Run LLM Pulse alongside Codex Desktop. Its menu bar status summarizes active and recently completed work, while the right-edge sidebar lists each local root task with its state, project, elapsed time, token usage, and active agent total.
+Run LLM Pulse alongside Codex Desktop. Its menu bar status summarizes active and recent work, while the right-edge sidebar lists every local root task with its state, project, elapsed time, token usage, and active agent total.
 
 ### Does LLM Pulse modify or control Codex tasks?
 
@@ -153,29 +149,25 @@ Yes. The plugin is optional. Without it, LLM Pulse uses read-only SQLite and rol
 
 Subagents do not appear as separate rows. LLM Pulse aggregates the active main agent and all active descendants into the root task’s `Agent N` value. If local evidence is incomplete, it shows an unknown or stale value instead of inventing zero.
 
-### What do the 5-hour and weekly numbers mean?
+### What does the weekly percentage mean?
 
-They are remaining percentages calculated from Codex’s reported used percentages, together with reset times. They are not absolute token balances. LLM Pulse keeps both windows from one complete snapshot rather than mixing values from different tasks.
+It is the remaining percentage calculated from the Codex-reported used percentage, together with the weekly reset time. It is not an absolute token balance. Reset dates and times use the Mac’s current system time zone.
 
-### How does LLM Pulse read Codex usage limits?
+### How does LLM Pulse read the Codex weekly usage limit?
 
-It asks the bundled local Codex App Server for the same grouped 5-hour and weekly limits shown by Codex Desktop. Compatible local rollout data is used only as a fallback, and LLM Pulse never combines windows from unrelated snapshots.
+It asks the bundled local Codex App Server for the weekly limit reported to Codex Desktop. Compatible local rollout data is used only as a fallback. The current interface and notifications use only the weekly window.
 
 ### Can LLM Pulse open a task directly in Codex Desktop?
 
 Yes. Clicking a row opens the matching task through a local `codex://threads/<thread-id>` link. If navigation fails, LLM Pulse keeps the task unread and reports the error instead of silently acknowledging it.
 
-### Why is a viewed task still under recently completed?
+### Why is a viewed task still under recent tasks?
 
 “Viewed” clears the unread state; it does not delete the history row. Completed, failed, and interrupted tasks remain in the recent list for up to 24 hours, subject to the 20-item cap.
 
-### Can v1.0.0 update itself?
-
-No. Install v1.1.0 manually once to add the in-app update channel. From v1.1.0 onward, use the menu bar’s `检查更新…` command.
-
 ### Does LLM Pulse support Codex CLI, IDE tasks, cloud tasks, or other AI coding tools?
 
-The current v1.4.0 release supports root tasks created by Codex Desktop on the local Mac. Claude Code and Qwen3.7 support is planned for LLM Pulse v2.0.0; see the [v2 implementation plan](docs/LLM_PULSE_V2_PLAN.md). v2.0.0 has not been published yet.
+No. LLM Pulse 2.0.0 currently supports local root tasks created by Codex Desktop only.
 
 ### Is LLM Pulse an official OpenAI product?
 
@@ -187,7 +179,7 @@ No. LLM Pulse is an independent open-source project by Zuuzii and is not affilia
 - `codex://threads/<thread-id>` works with the Codex Desktop builds tested for this release but is not a documented stable contract.
 - Opening a task directly inside Codex Desktop cannot be detected reliably. Open it from LLM Pulse or acknowledge it manually to clear its unread state.
 - Codex hooks have no separate approval-resolved event. A task may remain in the approval-waiting state until the related tool emits `PostToolUse`.
-- Usage-limit sources provide percentages and reset times, not a reliable absolute token allowance.
+- Weekly usage data provides a percentage and reset time, not a reliable absolute token allowance.
 - App-generated interface text supports English and Simplified Chinese. User task titles, project paths, and raw Codex content remain unchanged.
 
 ## Build from source
@@ -201,7 +193,7 @@ make check
 open ".build/DerivedData/Build/Products/Debug/LLM Pulse.app"
 ```
 
-`make check` generates the Xcode project, runs the Swift and plugin test suites, and builds the Debug app without code signing. For Xcode development, run `make open` and use the `GPTPulse` scheme.
+`make check` runs the brand-residual gate, generates the Xcode project, runs the Swift, Codex plugin, and release test suites, and builds the Debug app without code signing. For Xcode development, run `make open` and use the `LLMPulse` scheme and module.
 
 ## License and attribution
 

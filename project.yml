@@ -1,4 +1,4 @@
-name: GPTPulse
+name: LLMPulse
 
 options:
   bundleIdPrefix: com.zuuzii
@@ -26,19 +26,21 @@ packages:
     exactVersion: 2.9.4
 
 targets:
-  GPTPulse:
+  LLMPulse:
     type: application
     platform: macOS
+    productName: LLM Pulse
     sources:
-      - path: GPTPulse
+      - path: LLMPulse
         excludes:
           - Resources/Info.plist
     settings:
       base:
         PRODUCT_NAME: LLM Pulse
-        PRODUCT_MODULE_NAME: GPTPulse
-        PRODUCT_BUNDLE_IDENTIFIER: com.zuuzii.GPTPulse
-        INFOPLIST_FILE: GPTPulse/Resources/Info.plist
+        PRODUCT_MODULE_NAME: LLMPulse
+        PRODUCT_BUNDLE_IDENTIFIER: com.zuuzii.LLMPulse
+        DEVELOPMENT_TEAM: H74633HDAD
+        INFOPLIST_FILE: LLMPulse/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
         ENABLE_HARDENED_RUNTIME: YES
@@ -56,18 +58,18 @@ targets:
       - sdk: Security.framework
     scheme:
       testTargets:
-        - GPTPulseTests
+        - LLMPulseTests
 
-  GPTPulseTests:
+  LLMPulseTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: GPTPulseTests
+      - path: LLMPulseTests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.zuuzii.GPTPulseTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.zuuzii.LLMPulseTests
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/LLM Pulse.app/Contents/MacOS/LLM Pulse"
         BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
-      - target: GPTPulse
+      - target: LLMPulse

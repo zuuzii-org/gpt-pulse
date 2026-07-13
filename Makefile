@@ -1,4 +1,4 @@
-.PHONY: generate build test test-swift test-plugin check clean open
+.PHONY: generate build test test-swift test-plugin test-release check-brand check clean open
 
 DERIVED_DATA := .build/DerivedData
 
@@ -6,20 +6,26 @@ generate:
 	xcodegen generate
 
 build: generate
-	xcodebuild -project GPTPulse.xcodeproj -scheme GPTPulse -configuration Debug -derivedDataPath $(DERIVED_DATA) -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
+	xcodebuild -project LLMPulse.xcodeproj -scheme LLMPulse -configuration Debug -derivedDataPath $(DERIVED_DATA) -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO build
 
-test: test-swift test-plugin
+test: test-swift test-plugin test-release
 
 test-swift: generate
-	xcodebuild -project GPTPulse.xcodeproj -scheme GPTPulse -configuration Debug -derivedDataPath $(DERIVED_DATA) -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO test
+	xcodebuild -project LLMPulse.xcodeproj -scheme LLMPulse -configuration Debug -derivedDataPath $(DERIVED_DATA) -onlyUsePackageVersionsFromResolvedFile CODE_SIGNING_ALLOWED=NO test
 
 test-plugin:
 	python3 -m unittest discover -s Tests/Plugin -p 'test_*.py' -v
 
-check: test build
+test-release:
+	python3 -m unittest discover -s Tests/Release -p 'test_*.py' -v
+
+check-brand:
+	bash scripts/check_brand_residuals.sh
+
+check: check-brand test build
 
 open: generate
-	open GPTPulse.xcodeproj
+	open LLMPulse.xcodeproj
 
 clean:
-	xcodebuild -project GPTPulse.xcodeproj -scheme GPTPulse -derivedDataPath $(DERIVED_DATA) clean
+	xcodebuild -project LLMPulse.xcodeproj -scheme LLMPulse -derivedDataPath $(DERIVED_DATA) clean

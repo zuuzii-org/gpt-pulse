@@ -12,7 +12,7 @@ record_event() {
         "$script_directory/record_event.js" 2>/dev/null)
     [ -n "$event" ] || return
 
-    application_directory="$HOME/Library/Application Support/GPT Pulse"
+    application_directory="$HOME/Library/Application Support/LLM Pulse"
     events_directory="$application_directory/events"
     events_file="$events_directory/events.jsonl"
     lock_directory="$events_directory/.write-lock"
