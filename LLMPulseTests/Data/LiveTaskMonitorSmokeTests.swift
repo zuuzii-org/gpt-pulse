@@ -42,9 +42,14 @@ final class LiveTaskMonitorSmokeTests: XCTestCase {
 
         let snapshot = monitor.hubSnapshot
         XCTAssertFalse(snapshot.models.isEmpty, "Live Hub returned no model profiles")
-        XCTAssertTrue(
-            snapshot.models.contains { $0.identity.profileID == .codex },
+        let codexModel = try XCTUnwrap(
+            snapshot.models.first { $0.identity.profileID == .codex },
             "Live Hub omitted the required Codex profile"
+        )
+        XCTAssertNotEqual(
+            codexModel.refreshedAt,
+            .distantPast,
+            "Live Hub did not complete the first local task snapshot"
         )
         XCTAssertEqual(
             Set(snapshot.models.map(\.identity.profileID)).count,
@@ -56,6 +61,12 @@ final class LiveTaskMonitorSmokeTests: XCTestCase {
                 model.tasks.allSatisfy { $0.profileID == model.identity.profileID }
             },
             "Live Hub returned a task under the wrong profile"
+        )
+        XCTAssertFalse(
+            codexModel.health.contains {
+                $0.adapter == .runtimeSource && $0.status == .unavailable
+            },
+            "Live Hub timed out before the first local task snapshot completed"
         )
 
         // Privacy contract: diagnostics contain only a stable profile ID,

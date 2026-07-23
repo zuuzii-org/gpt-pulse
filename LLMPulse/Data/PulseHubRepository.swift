@@ -13,14 +13,21 @@ struct PulseHubRepository: PulseHubRepositoryProtocol {
     init(
         sources modelSources: [any ModelSnapshotSourceProtocol],
         receiptRepository: any TaskRepositoryProtocol,
-        sourceRefreshTimeout: Duration = .seconds(2)
+        sourceRefreshTimeout: Duration = .seconds(2),
+        initialSourceRefreshTimeout: Duration? = nil
     ) {
         precondition(sourceRefreshTimeout > .zero, "Source refresh timeout must be positive")
+        let resolvedInitialTimeout = initialSourceRefreshTimeout ?? sourceRefreshTimeout
+        precondition(
+            resolvedInitialTimeout > .zero,
+            "Initial source refresh timeout must be positive"
+        )
         sources = modelSources.map { source in
             Source(
                 coordinator: TimedModelSource(
                     source: source,
-                    timeout: sourceRefreshTimeout
+                    timeout: sourceRefreshTimeout,
+                    initialTimeout: resolvedInitialTimeout
                 )
             )
         }
@@ -30,14 +37,16 @@ struct PulseHubRepository: PulseHubRepositoryProtocol {
     init(
         repositories: [any ModelTaskRepositoryProtocol],
         receiptRepository: any TaskRepositoryProtocol,
-        sourceRefreshTimeout: Duration = .seconds(2)
+        sourceRefreshTimeout: Duration = .seconds(2),
+        initialSourceRefreshTimeout: Duration? = nil
     ) {
         self.init(
             sources: repositories.map { repository in
                 SingleModelSourceAdapter(repository: repository)
             },
             receiptRepository: receiptRepository,
-            sourceRefreshTimeout: sourceRefreshTimeout
+            sourceRefreshTimeout: sourceRefreshTimeout,
+            initialSourceRefreshTimeout: initialSourceRefreshTimeout
         )
     }
 
@@ -171,6 +180,7 @@ actor TimedModelSource {
     private let source: any ModelSnapshotSourceProtocol
     private let sourceID: ModelSourceID
     private let timeout: Duration
+    private let initialTimeout: Duration
     private var generation: UInt64 = 0
     private var waiterID: UInt64 = 0
     private var inFlight: Flight?
@@ -179,10 +189,15 @@ actor TimedModelSource {
     private var waitingCallers: [UInt64: WaitingCaller] = [:]
     private var lastSnapshot: ModelSourceSnapshot?
 
-    init(source: any ModelSnapshotSourceProtocol, timeout: Duration) {
+    init(
+        source: any ModelSnapshotSourceProtocol,
+        timeout: Duration,
+        initialTimeout: Duration? = nil
+    ) {
         self.source = source
         sourceID = source.sourceID
         self.timeout = timeout
+        self.initialTimeout = initialTimeout ?? timeout
     }
 
     func snapshot(now: Date) async -> ModelSourceSnapshot {
@@ -267,7 +282,7 @@ actor TimedModelSource {
 
         waiterID &+= 1
         let currentWaiterID = waiterID
-        let timeout = timeout
+        let timeout = lastSnapshot == nil ? initialTimeout : self.timeout
 
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in

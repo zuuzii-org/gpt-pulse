@@ -32,6 +32,20 @@ final class RolloutMetadataReaderTests: XCTestCase {
             "current-desktop"
         )
 
+        let currentDesktopWithoutThreadSourceURL = directory
+            .appendingPathComponent("current-desktop-without-thread-source.jsonl")
+        try writeMetadata(
+            to: currentDesktopWithoutThreadSourceURL,
+            id: "current-desktop-without-thread-source",
+            originator: "codex_work_desktop",
+            source: "vscode",
+            threadSource: nil
+        )
+        XCTAssertEqual(
+            try reader.readDesktopRoot(from: currentDesktopWithoutThreadSourceURL)?.threadId,
+            "current-desktop-without-thread-source"
+        )
+
         let vscodeURL = directory.appendingPathComponent("vscode.jsonl")
         try writeMetadata(
             to: vscodeURL,
@@ -52,6 +66,27 @@ final class RolloutMetadataReaderTests: XCTestCase {
             parentThreadId: "desktop"
         )
         XCTAssertNil(try reader.readDesktopRoot(from: subagentURL))
+
+        let automationURL = directory.appendingPathComponent("automation.jsonl")
+        try writeMetadata(
+            to: automationURL,
+            id: "automation",
+            originator: "Codex Desktop",
+            source: "vscode",
+            threadSource: "automation"
+        )
+        XCTAssertNil(try reader.readDesktopRoot(from: automationURL))
+
+        let malformedThreadSourceURL = directory
+            .appendingPathComponent("malformed-thread-source.jsonl")
+        try writeMetadata(
+            to: malformedThreadSourceURL,
+            id: "malformed-thread-source",
+            originator: "Codex Desktop",
+            source: "vscode",
+            threadSource: 42
+        )
+        XCTAssertNil(try reader.readDesktopRoot(from: malformedThreadSourceURL))
     }
 
     private func writeMetadata(
@@ -59,17 +94,19 @@ final class RolloutMetadataReaderTests: XCTestCase {
         id: String,
         originator: String,
         source: Any,
-        threadSource: String,
+        threadSource: Any?,
         parentThreadId: String? = nil
     ) throws {
         var payload: [String: Any] = [
             "id": id,
             "originator": originator,
             "source": source,
-            "thread_source": threadSource,
             "cwd": "/tmp/project",
             "timestamp": "2026-07-10T10:00:00Z",
         ]
+        if let threadSource {
+            payload["thread_source"] = threadSource
+        }
         if let parentThreadId {
             payload["parent_thread_id"] = parentThreadId
         }

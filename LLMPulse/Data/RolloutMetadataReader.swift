@@ -24,11 +24,13 @@ struct RolloutMetadataReader: Sendable {
             throw DataAdapterError.invalidFormat(url, "session_meta payload is missing")
         }
 
+        let hasThreadSource = payload.keys.contains("thread_source")
+        let threadSource = JSONValueSupport.string(payload["thread_source"])
         guard
             let originator = payload["originator"] as? String,
             Self.desktopOriginators.contains(originator),
             payload["source"] as? String == "vscode",
-            payload["thread_source"] as? String == "user",
+            !hasThreadSource || threadSource == "user",
             JSONValueSupport.string(payload["parent_thread_id"]) == nil
         else {
             return nil

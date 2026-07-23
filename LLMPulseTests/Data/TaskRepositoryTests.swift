@@ -4,7 +4,7 @@ import XCTest
 @testable import LLMPulse
 
 final class TaskRepositoryTests: XCTestCase {
-    func testCurrentCodexDesktopOriginatorProducesRunningTask() async throws {
+    func testCurrentCodexDesktopOriginatorWithoutThreadSourceProducesRunningTask() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -17,7 +17,8 @@ final class TaskRepositoryTests: XCTestCase {
             threadId: "current-desktop",
             turnId: "current-turn",
             startedAt: now.addingTimeInterval(-5),
-            originator: "codex_work_desktop"
+            originator: "codex_work_desktop",
+            threadSource: nil
         )
         let receipts = ReceiptStore(databaseURL: root.appendingPathComponent("receipts.sqlite"))
         _ = try await receipts.snapshot(now: now.addingTimeInterval(-60))
@@ -576,21 +577,25 @@ final class TaskRepositoryTests: XCTestCase {
         threadId: String,
         turnId: String,
         startedAt: Date,
-        originator: String = "Codex Desktop"
+        originator: String = "Codex Desktop",
+        threadSource: String? = "user"
     ) throws {
+        var metadataPayload: [String: Any] = [
+            "id": threadId,
+            "session_id": threadId,
+            "originator": originator,
+            "source": "vscode",
+            "cwd": "/tmp/project",
+            "timestamp": startedAt.ISO8601Format(),
+        ]
+        if let threadSource {
+            metadataPayload["thread_source"] = threadSource
+        }
         try writeJSONLines([
             [
                 "type": "session_meta",
                 "timestamp": startedAt.ISO8601Format(),
-                "payload": [
-                    "id": threadId,
-                    "session_id": threadId,
-                    "originator": originator,
-                    "source": "vscode",
-                    "thread_source": "user",
-                    "cwd": "/tmp/project",
-                    "timestamp": startedAt.ISO8601Format(),
-                ],
+                "payload": metadataPayload,
             ],
             [
                 "type": "event_msg",

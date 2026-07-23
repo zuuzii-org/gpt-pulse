@@ -306,6 +306,72 @@ final class PulseHubRepositoryTests: XCTestCase {
         )
     }
 
+    func testInitialRefreshCanWaitLongerThanSteadyStateTimeout() async {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let task = makeTask(threadID: "slow-initial", turnID: "turn")
+        let snapshot = ModelTaskSnapshot(
+            identity: .codex,
+            tasks: [task],
+            health: [],
+            refreshedAt: now
+        )
+        let repository = PulseHubRepository(
+            repositories: [
+                DelayedModelRepository(
+                    snapshot: snapshot,
+                    delayNanoseconds: 50_000_000
+                ),
+            ],
+            receiptRepository: RecordingTaskRepository(snapshot: .empty),
+            sourceRefreshTimeout: .milliseconds(10),
+            initialSourceRefreshTimeout: .milliseconds(250)
+        )
+
+        let result = await repository.snapshot(now: now)
+
+        XCTAssertEqual(result.codexTaskSnapshot?.tasks.map(\.id), [task.id])
+        XCTAssertFalse(
+            result.models.flatMap(\.health).contains {
+                $0.adapter == .runtimeSource && $0.status == .unavailable
+            }
+        )
+    }
+
+    func testInitialRefreshStillHonorsItsHardTimeout() async {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let probe = SourceStartProbe()
+        let source = BlockingModelSource(
+            sourceID: ModelSourceID(singleProfile: .codex),
+            fallbackIdentities: [.codex],
+            snapshot: ModelSourceSnapshot(
+                sourceID: ModelSourceID(singleProfile: .codex),
+                models: [ModelTaskSnapshot(
+                    identity: .codex,
+                    tasks: [],
+                    health: [],
+                    refreshedAt: now
+                )],
+                refreshedAt: now
+            ),
+            probe: probe
+        )
+        let repository = PulseHubRepository(
+            sources: [source],
+            receiptRepository: RecordingTaskRepository(snapshot: .empty),
+            sourceRefreshTimeout: .milliseconds(10),
+            initialSourceRefreshTimeout: .milliseconds(40)
+        )
+
+        let result = await repository.snapshot(now: now)
+        await probe.release()
+
+        XCTAssertEqual(result.models.map(\.identity.profileID), [.codex])
+        XCTAssertEqual(
+            result.models.first?.health.first { $0.adapter == .runtimeSource }?.status,
+            .unavailable
+        )
+    }
+
     func testHubStartsEverySourceBeforeEitherOneCompletes() async {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let probe = SourceStartProbe()
@@ -1345,4 +1411,3 @@ private actor UnavailableReceiptRepository: TaskRepositoryProtocol {
     func unmarkViewed(_ task: PulseTask) async throws {}
     func unmarkViewed(_ tasks: [PulseTask]) async throws {}
 }
-

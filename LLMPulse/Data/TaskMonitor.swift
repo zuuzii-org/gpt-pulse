@@ -3,6 +3,8 @@ import Foundation
 
 @MainActor
 final class TaskMonitor: ObservableObject {
+    private static let liveInitialSourceRefreshTimeout: Duration = .seconds(30)
+
     @Published private(set) var snapshot: TaskSnapshot
     @Published private(set) var hubSnapshot: PulseHubSnapshot
 
@@ -51,7 +53,9 @@ final class TaskMonitor: ObservableObject {
         return TaskMonitor(
             hubRepository: PulseHubRepository(
                 sources: [SingleModelSourceAdapter(repository: codexRepository)],
-                receiptRepository: taskRepository
+                receiptRepository: taskRepository,
+                sourceRefreshTimeout: .seconds(2),
+                initialSourceRefreshTimeout: Self.liveInitialSourceRefreshTimeout
             ),
             refreshInterval: refreshInterval
         )
