@@ -3,7 +3,7 @@ import XCTest
 @testable import LLMPulse
 
 final class RolloutMetadataReaderTests: XCTestCase {
-    func testAcceptsOnlyCodexDesktopUserRoot() throws {
+    func testAcceptsSupportedCodexDesktopUserRootsOnly() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -18,6 +18,19 @@ final class RolloutMetadataReaderTests: XCTestCase {
 
         let reader = RolloutMetadataReader()
         XCTAssertEqual(try reader.readDesktopRoot(from: desktopURL)?.threadId, "desktop")
+
+        let currentDesktopURL = directory.appendingPathComponent("current-desktop.jsonl")
+        try writeMetadata(
+            to: currentDesktopURL,
+            id: "current-desktop",
+            originator: "codex_work_desktop",
+            source: "vscode",
+            threadSource: "user"
+        )
+        XCTAssertEqual(
+            try reader.readDesktopRoot(from: currentDesktopURL)?.threadId,
+            "current-desktop"
+        )
 
         let vscodeURL = directory.appendingPathComponent("vscode.jsonl")
         try writeMetadata(

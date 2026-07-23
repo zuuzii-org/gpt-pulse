@@ -1,6 +1,11 @@
 import Foundation
 
 struct RolloutMetadataReader: Sendable {
+    private static let desktopOriginators: Set<String> = [
+        "Codex Desktop",
+        "codex_work_desktop",
+    ]
+
     private let maximumFirstLineBytes: Int
 
     init(maximumFirstLineBytes: Int = 4 * 1_024 * 1_024) {
@@ -20,7 +25,8 @@ struct RolloutMetadataReader: Sendable {
         }
 
         guard
-            payload["originator"] as? String == "Codex Desktop",
+            let originator = payload["originator"] as? String,
+            Self.desktopOriginators.contains(originator),
             payload["source"] as? String == "vscode",
             payload["thread_source"] as? String == "user",
             JSONValueSupport.string(payload["parent_thread_id"]) == nil

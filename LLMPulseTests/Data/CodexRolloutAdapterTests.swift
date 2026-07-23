@@ -63,7 +63,7 @@ final class CodexRolloutAdapterTests: XCTestCase {
             "timestamp": timestamp.ISO8601Format(),
             "payload": [
                 "id": "thread-1",
-                "originator": "Codex Desktop",
+                "originator": "codex_work_desktop",
                 "source": "vscode",
                 "thread_source": "user",
                 "cwd": "/tmp/project",

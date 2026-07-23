@@ -4,6 +4,38 @@ import XCTest
 @testable import LLMPulse
 
 final class TaskRepositoryTests: XCTestCase {
+    func testCurrentCodexDesktopOriginatorProducesRunningTask() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
+
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try writeRunningRollout(
+            to: sessions.appendingPathComponent("current-desktop.jsonl"),
+            threadId: "current-desktop",
+            turnId: "current-turn",
+            startedAt: now.addingTimeInterval(-5),
+            originator: "codex_work_desktop"
+        )
+        let receipts = ReceiptStore(databaseURL: root.appendingPathComponent("receipts.sqlite"))
+        _ = try await receipts.snapshot(now: now.addingTimeInterval(-60))
+        let repository = makeRepository(
+            root: root,
+            sessions: sessions,
+            sqliteCandidates: [],
+            receiptStore: receipts
+        )
+
+        let snapshot = await repository.snapshot(now: now)
+
+        XCTAssertEqual(snapshot.tasks.count, 1)
+        XCTAssertEqual(snapshot.tasks.first?.threadId, "current-desktop")
+        XCTAssertEqual(snapshot.tasks.first?.state, .running)
+        XCTAssertEqual(snapshot.tasks.first?.turnId, "current-turn")
+    }
+
     func testUpgradeOnlyPluginJournalRemainsReadableWithoutWritingLegacyState() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -543,7 +575,8 @@ final class TaskRepositoryTests: XCTestCase {
         to url: URL,
         threadId: String,
         turnId: String,
-        startedAt: Date
+        startedAt: Date,
+        originator: String = "Codex Desktop"
     ) throws {
         try writeJSONLines([
             [
@@ -552,7 +585,7 @@ final class TaskRepositoryTests: XCTestCase {
                 "payload": [
                     "id": threadId,
                     "session_id": threadId,
-                    "originator": "Codex Desktop",
+                    "originator": originator,
                     "source": "vscode",
                     "thread_source": "user",
                     "cwd": "/tmp/project",

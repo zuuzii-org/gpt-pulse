@@ -12,7 +12,11 @@ final class CodexSQLiteTaskAdapterTests: XCTestCase {
         let desktopRollout = directory.appendingPathComponent("desktop.jsonl")
         let vscodeRollout = directory.appendingPathComponent("vscode.jsonl")
         let childRollout = directory.appendingPathComponent("child.jsonl")
-        try writeMetadata(to: desktopRollout, id: "desktop", originator: "Codex Desktop")
+        try writeMetadata(
+            to: desktopRollout,
+            id: "desktop",
+            originator: "codex_work_desktop"
+        )
         try writeMetadata(to: vscodeRollout, id: "vscode", originator: "Codex VS Code")
         try writeMetadata(
             to: childRollout,
